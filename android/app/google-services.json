@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1004987376103",
+    "project_id": "bina-v-3",
+    "storage_bucket": "bina-v-3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1004987376103:android:c3fc7c79a951cee0bd5d42",
+        "android_client_info": {
+          "package_name": "com.binav3"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDg6Ncs9yZuPuaQ9ybxug29TARiJy70z6o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
