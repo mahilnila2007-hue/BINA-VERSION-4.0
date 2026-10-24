@@ -13,11 +13,13 @@ import '../../domain/models/pose_keypoint.dart';
 import '../../domain/models/prescription.dart';
 import '../../domain/models/rep_verdict.dart';
 import '../../domain/models/repetition_data.dart';
+import '../../domain/models/sensor_reading.dart';
 import '../../domain/models/session_record.dart';
 import '../../domain/services/haptic_service.dart';
 import '../../domain/services/tts_service.dart';
 import '../../services/camera_service.dart';
 import '../../services/exercise_analysis_engine.dart';
+import '../../services/sensor_data_source.dart';
 import '../../services/yolo_pose_service.dart';
 import '../../widgets/pose_skeleton_painter.dart';
 import '../../widgets/responsive_screen_frame.dart';
@@ -92,11 +94,19 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   // Toggles & Preferences
   bool _voiceEnabled = true;
   bool _hapticEnabled = true;
-  bool _demoModeEnabled = false; // Real hardware disconnected by default
-  bool _showDebugPanel = false;  // Developer / Debug Telemetry Toggle
+  bool _showDebugPanel = false; // Developer / Debug Telemetry Toggle
 
-  // Telemetry Time-Series for Sensor Graph
-  final List<double> _graphPoints = List.generate(24, (_) => 15.0);
+  // Sensor Telemetry & Abstraction Layer (Demo vs Real Hardware)
+  late SensorDataSource _sensorDataSource;
+  StreamSubscription<SensorReading>? _sensorSubscription;
+  late SensorReading _currentReading;
+  bool get _isDemoMode => _sensorDataSource.mode == SensorMode.demo;
+
+  // Telemetry Time-Series for Sensor Graph (pre-populated with realistic initial muscle activation)
+  final List<double> _graphPoints = List.generate(
+    28,
+    (i) => (18.0 + 10.0 * math.sin(i * 0.4) + 6.0 * math.sin(i * 1.2)).clamp(5.0, 85.0),
+  );
   int _graphMetricIndex = 0; // 0 = EMG Activation, 1 = Joint Angle
 
   // Real-time YOLO Pose
@@ -117,7 +127,44 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
       duration: const Duration(milliseconds: 900),
     )..repeat(reverse: true);
 
+    // Initialize Sensor Data Source (default to Demo Mode with immediate physiological values)
+    _sensorDataSource = DemoSensorDataSource();
+    _currentReading = _sensorDataSource.currentReading;
+    _subscribeToSensorStream();
+
     _initCameraAndAI();
+  }
+
+  void _subscribeToSensorStream() {
+    _sensorSubscription?.cancel();
+    _sensorSubscription = _sensorDataSource.readingStream.listen((reading) {
+      if (!mounted || _isPaused) return;
+      setState(() {
+        _currentReading = reading;
+        if (_graphMetricIndex == 0) {
+          _graphPoints.removeAt(0);
+          _graphPoints.add(reading.emgActivationPct);
+        } else {
+          _graphPoints.removeAt(0);
+          _graphPoints.add((_currentAngle / 180.0 * 100.0).clamp(0.0, 100.0));
+        }
+      });
+    });
+  }
+
+  void _toggleSensorMode() {
+    _sensorSubscription?.cancel();
+    _sensorDataSource.dispose();
+
+    if (_sensorDataSource.mode == SensorMode.demo) {
+      _sensorDataSource = RealSensorDataSource();
+    } else {
+      _sensorDataSource = DemoSensorDataSource();
+    }
+
+    _currentReading = _sensorDataSource.currentReading;
+    _subscribeToSensorStream();
+    setState(() {});
   }
 
   void _initCameraAndAI() async {
@@ -153,7 +200,6 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
       if (!_isPaused && mounted) {
         setState(() {
           _elapsedSeconds++;
-          _updateGraphData();
         });
       }
     });
@@ -203,6 +249,15 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
       prescription: rx,
     );
 
+    // Forward kinematics to SensorDataSource for exercise-responsive biometrics
+    _sensorDataSource.updateExerciseState(
+      phase: result.phase,
+      currentAngle: result.angle,
+      isContracting: result.angle >= rx.minAngle,
+      targetMinAngle: rx.minAngle,
+      targetMaxAngle: rx.maxAngle,
+    );
+
     setState(() {
       _currentPose = pose;
       _currentAngle = result.angle;
@@ -229,7 +284,9 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
           peakAngle: _currentAngle,
           duration: 2.4,
           verdict: result.verdict,
-          emgActivation: _demoModeEnabled ? 74.0 : 0.0,
+          emgActivation: _isDemoMode
+              ? _currentReading.emgActivationPct
+              : (_currentReading.isConnected ? _currentReading.emgActivationPct : 0.0),
           timestamp: DateTime.now(),
         ));
 
@@ -243,27 +300,6 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     if (result.spokenCue != null && _voiceEnabled && !_isPaused) {
       TtsService().speak(result.spokenCue!);
     }
-  }
-
-  void _updateGraphData() {
-    double nextValue;
-    if (_graphMetricIndex == 0) {
-      // EMG Muscle Activation
-      if (_demoModeEnabled) {
-        final isContracting = _currentAngle > (_minAllowedAngle - 10.0);
-        nextValue = isContracting
-            ? (65.0 + math.Random().nextDouble() * 25.0)
-            : (10.0 + math.Random().nextDouble() * 12.0);
-      } else {
-        nextValue = 0.0;
-      }
-    } else {
-      // Joint Angle (0-180 mapped to 0-100%)
-      nextValue = (_currentAngle / 180.0 * 100.0).clamp(0.0, 100.0);
-    }
-
-    _graphPoints.removeAt(0);
-    _graphPoints.add(nextValue);
   }
 
   void _finishSession() {
@@ -286,12 +322,12 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
       incorrectReps: _incorrectReps,
       adherence: adherence,
       averageAngle: _currentAngle > 0 ? _currentAngle : 124.0,
-      maxHR: _demoModeEnabled ? 78 : 0,
-      minSpO2: _demoModeEnabled ? 98 : 0,
-      temperature: _demoModeEnabled ? 27.2 : 0.0,
-      humidity: _demoModeEnabled ? 60.0 : 0.0,
-      averageEmg: _demoModeEnabled ? 44.0 : 0.0,
-      peakEmg: _demoModeEnabled ? 88.0 : 0.0,
+      maxHR: _currentReading.heartRate > 0 ? _currentReading.heartRate : 78,
+      minSpO2: _currentReading.spo2 > 0 ? _currentReading.spo2 : 98,
+      temperature: _currentReading.temperature > 0 ? _currentReading.temperature : 36.6,
+      humidity: _currentReading.humidity > 0 ? _currentReading.humidity : 52.0,
+      averageEmg: _isDemoMode ? 44.0 : (_currentReading.isConnected ? _currentReading.emgActivationPct : 0.0),
+      peakEmg: _isDemoMode ? 85.0 : (_currentReading.isConnected ? 90.0 : 0.0),
       repetitions: _completedRepData,
       isSynced: false,
     );
@@ -434,6 +470,8 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   @override
   void dispose() {
     _sessionTimer?.cancel();
+    _sensorSubscription?.cancel();
+    _sensorDataSource.dispose();
     _pulseController.dispose();
     _cameraService.dispose();
     _yoloService.dispose();
@@ -1221,51 +1259,56 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   // Title Bar: STATUS & GUIDANCE + Confidence Tag
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: statusColor,
-                              shape: BoxShape.circle,
+                  FittedBox(
+                    fit: BoxFit.scaleDown,
+                    alignment: Alignment.centerLeft,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: statusColor,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 5),
+                            const Text(
+                              'STATUS & GUIDANCE',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 9.0,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isDetected ? statusColor.withValues(alpha: 0.15) : Colors.white10,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: isDetected ? statusColor.withValues(alpha: 0.4) : Colors.white24,
+                              width: 0.8,
                             ),
                           ),
-                          const SizedBox(width: 5),
-                          const Text(
-                            'STATUS & GUIDANCE',
+                          child: Text(
+                            isDetected ? 'CONF ${(conf * 100).toInt()}%' : 'NO POSE',
                             style: TextStyle(
-                              color: Colors.white70,
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.8,
+                              color: isDetected ? statusColor : Colors.white54,
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
-                        ],
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: isDetected ? statusColor.withValues(alpha: 0.15) : Colors.white10,
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: isDetected ? statusColor.withValues(alpha: 0.4) : Colors.white24,
-                            width: 0.8,
-                          ),
                         ),
-                        child: Text(
-                          isDetected ? 'CONF ${(conf * 100).toInt()}%' : 'NO POSE',
-                          style: TextStyle(
-                            color: isDetected ? statusColor : Colors.white54,
-                            fontSize: 8.5,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 6),
 
@@ -1369,7 +1412,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header Row: DASHBOARD + Demo Trigger
+                      // Header Row: DASHBOARD + Sensor Mode Trigger
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1377,30 +1420,29 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                             'LIVE DASHBOARD',
                             style: TextStyle(
                               color: Colors.white70,
-                              fontSize: 10,
+                              fontSize: 9.5,
                               fontWeight: FontWeight.w900,
-                              letterSpacing: 0.9,
+                              letterSpacing: 0.6,
                             ),
                           ),
                           GestureDetector(
-                            onTap: () {
-                              setState(() {
-                                _demoModeEnabled = !_demoModeEnabled;
-                              });
-                            },
+                            onTap: _toggleSensorMode,
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
                               decoration: BoxDecoration(
-                                color: _demoModeEnabled ? AppColors.success.withValues(alpha: 0.2) : Colors.white10,
+                                color: _isDemoMode
+                                    ? AppColors.primary.withValues(alpha: 0.22)
+                                    : AppColors.success.withValues(alpha: 0.22),
                                 borderRadius: BorderRadius.circular(5),
                                 border: Border.all(
-                                  color: _demoModeEnabled ? AppColors.success : Colors.white24,
+                                  color: _isDemoMode ? AppColors.primaryLight : AppColors.success,
+                                  width: 0.8,
                                 ),
                               ),
                               child: Text(
-                                _demoModeEnabled ? 'ESP32 ON' : 'NO SENSOR',
+                                _isDemoMode ? 'DEMO MODE' : 'REAL-TIME',
                                 style: TextStyle(
-                                  color: _demoModeEnabled ? AppColors.success : Colors.white54,
+                                  color: _isDemoMode ? AppColors.primaryLight : AppColors.success,
                                   fontSize: 8,
                                   fontWeight: FontWeight.w900,
                                 ),
@@ -1412,31 +1454,43 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                       const SizedBox(height: 5),
 
                       // Sensor Biosignal Rows
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          _buildMiniSensorChip(
-                            icon: Icons.favorite_rounded,
-                            color: const Color(0xFFEF4444),
-                            label: 'HR',
-                            value: _demoModeEnabled ? '78' : '--',
-                            unit: 'BPM',
-                          ),
-                          _buildMiniSensorChip(
-                            icon: Icons.water_drop_rounded,
-                            color: const Color(0xFF3B82F6),
-                            label: 'SpO₂',
-                            value: _demoModeEnabled ? '98' : '--',
-                            unit: '%',
-                          ),
-                          _buildMiniSensorChip(
-                            icon: Icons.bolt_rounded,
-                            color: const Color(0xFFF59E0B),
-                            label: 'EMG',
-                            value: _demoModeEnabled ? '44' : '--',
-                            unit: '%',
-                          ),
-                        ],
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            _buildMiniSensorChip(
+                              icon: Icons.favorite_rounded,
+                              color: const Color(0xFFEF4444),
+                              label: 'HR',
+                              value: _isDemoMode
+                                  ? '${_currentReading.heartRate}'
+                                  : (_currentReading.isConnected ? '${_currentReading.heartRate}' : '--'),
+                              unit: 'BPM',
+                            ),
+                            const SizedBox(width: 5),
+                            _buildMiniSensorChip(
+                              icon: Icons.water_drop_rounded,
+                              color: const Color(0xFF3B82F6),
+                              label: 'SpO₂',
+                              value: _isDemoMode
+                                  ? '${_currentReading.spo2}'
+                                  : (_currentReading.isConnected ? '${_currentReading.spo2}' : '--'),
+                              unit: '%',
+                            ),
+                            const SizedBox(width: 5),
+                            _buildMiniSensorChip(
+                              icon: Icons.bolt_rounded,
+                              color: const Color(0xFFF59E0B),
+                              label: 'EMG',
+                              value: _isDemoMode
+                                  ? '${_currentReading.emgActivationPct.round()}'
+                                  : (_currentReading.isConnected ? '${_currentReading.emgActivationPct.round()}' : '--'),
+                              unit: '%',
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 5),
 
@@ -1466,7 +1520,11 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                             ),
                           ),
                           Text(
-                            _graphMetricIndex == 0 ? '${_graphPoints.last.toStringAsFixed(0)}%' : '${_currentAngle.toStringAsFixed(0)}°',
+                            _graphMetricIndex == 0
+                                ? (_isDemoMode || _currentReading.isConnected
+                                    ? '${_currentReading.emgActivationPct.round()}%'
+                                    : '--%')
+                                : '${_currentAngle.toStringAsFixed(0)}°',
                             style: const TextStyle(color: AppColors.primaryLight, fontSize: 9, fontWeight: FontWeight.w800),
                           ),
                         ],
@@ -1487,34 +1545,40 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                       const SizedBox(height: 5),
 
                       // Rep, Angle & Form Metrics Row
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'REP ${_currentRep.toString().padLeft(2, '0')}/${_targetReps.toString().padLeft(2, '0')}',
-                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF00E5FF).withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.35)),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerLeft,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'REP ${_currentRep.toString().padLeft(2, '0')}/${_targetReps.toString().padLeft(2, '0')}',
+                              style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w900),
                             ),
-                            child: Text(
-                              'ANGLE ${_currentAngle.toStringAsFixed(0)}°',
-                              style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 9, fontWeight: FontWeight.w900),
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00E5FF).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.35)),
+                              ),
+                              child: Text(
+                                'ANGLE ${_currentAngle.toStringAsFixed(0)}°',
+                                style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 8.5, fontWeight: FontWeight.w900),
+                              ),
                             ),
-                          ),
-                          Text(
-                            'FORM $formAccuracy%',
-                            style: TextStyle(
-                              color: formAccuracy >= 80 ? AppColors.success : AppColors.warning,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900,
+                            const SizedBox(width: 6),
+                            Text(
+                              'FORM $formAccuracy%',
+                              style: TextStyle(
+                                color: formAccuracy >= 80 ? AppColors.success : AppColors.warning,
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -1531,6 +1595,11 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                               setState(() {
                                 _isPaused = !_isPaused;
                               });
+                              if (_isPaused) {
+                                _sensorDataSource.pause();
+                              } else {
+                                _sensorDataSource.resume();
+                              }
                               if (_voiceEnabled) {
                                 TtsService().speak(_isPaused ? 'Exercise paused' : 'Resuming exercise');
                               }
