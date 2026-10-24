@@ -91,6 +91,28 @@ class DetectedPose {
         (elbow?.isVisible ?? false);
   }
 
+  // Check if elbow exercise required joints are visible (Shoulder, Elbow, Wrist)
+  bool get hasElbowJointsVisible {
+    final shoulder = getKeypoint(CocoJoint.leftShoulder) ?? getKeypoint(CocoJoint.rightShoulder);
+    final elbow = getKeypoint(CocoJoint.leftElbow) ?? getKeypoint(CocoJoint.rightElbow);
+    final wrist = getKeypoint(CocoJoint.leftWrist) ?? getKeypoint(CocoJoint.rightWrist);
+
+    return (shoulder?.isVisible ?? false) &&
+        (elbow?.isVisible ?? false) &&
+        (wrist?.isVisible ?? false);
+  }
+
+  // Check if hip exercise required joints are visible (Shoulder, Hip, Knee)
+  bool get hasHipJointsVisible {
+    final shoulder = getKeypoint(CocoJoint.leftShoulder) ?? getKeypoint(CocoJoint.rightShoulder);
+    final hip = getKeypoint(CocoJoint.leftHip) ?? getKeypoint(CocoJoint.rightHip);
+    final knee = getKeypoint(CocoJoint.leftKnee) ?? getKeypoint(CocoJoint.rightKnee);
+
+    return (shoulder?.isVisible ?? false) &&
+        (hip?.isVisible ?? false) &&
+        (knee?.isVisible ?? false);
+  }
+
   // Check if full body is generally in frame
   bool get isFullBodyInFrame {
     final head = getKeypoint(CocoJoint.nose);

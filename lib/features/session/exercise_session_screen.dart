@@ -25,18 +25,14 @@ import '../auth/auth_provider.dart';
 
 /// Professional AI Rehabilitation Live Exercise Monitoring Screen.
 /// 
-/// EXACT TWO-TIER GEOMETRY:
-/// ─────────────────────────────────────────────
-/// TOP 50–55%:
-///   Real Android Camera + YOLO Pose Skeleton
-///   User visible + Real body tracking
-///   Compact Translucent Overlays (Angle, Target, Form Status Pill)
-/// 
-/// BOTTOM 45–50%:
-///   Horizontal Row Split (Side-by-Side):
-///   - LEFT PANEL  = HOW TO DO (Concise elderly instructions + Watch Video)
-///   - RIGHT PANEL = LIVE DASHBOARD (Sensors, Live Graph, Rep/Form, [PAUSE] [STOP])
-/// ─────────────────────────────────────────────
+/// Integrates the real YOLO Pose detection module into the continuous camera feed:
+/// - Real Android camera preview
+/// - YOLO Pose 17 COCO keypoints skeleton overlay
+/// - Exercise-specific joint angle calculations (Knee, Elbow, Shoulder, Hip, Hand)
+/// - Real-time form feedback (✓ GOOD REP / ✕ INCORRECT)
+/// - Multi-phase state machine repetition counting
+/// - Person detection status & Vision AI lifecycle tracking
+/// - Developer / Debug telemetry panel
 class ExerciseSessionScreen extends ConsumerStatefulWidget {
   final bool isReplayMode;
 
@@ -65,7 +61,6 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   int _incorrectReps = 0;
   int _elapsedSeconds = 0;
   Timer? _sessionTimer;
-  Timer? _interactiveSimulationTimer;
 
   // Real-time Kinematics
   double _currentAngle = 0.0;
@@ -75,7 +70,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   String _currentFeedback = 'MOVE INTO CAMERA VIEW';
   Color _feedbackColor = AppColors.info;
   IconData _feedbackIcon = Icons.accessibility_new_rounded;
-  CocoJoint _activeJoint = CocoJoint.rightShoulder;
+  CocoJoint _activeJoint = CocoJoint.rightKnee;
   bool _isMovementCorrect = false;
   bool _isOccluded = false;
 
@@ -83,8 +78,9 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   bool _voiceEnabled = true;
   bool _hapticEnabled = true;
   bool _demoModeEnabled = false; // Real hardware disconnected by default
+  bool _showDebugPanel = false;  // Developer / Debug Telemetry Toggle
 
-  // Telemetry Time-Series for Compact Sensor Graph
+  // Telemetry Time-Series for Sensor Graph
   final List<double> _graphPoints = List.generate(24, (_) => 15.0);
   int _graphMetricIndex = 0; // 0 = EMG Activation, 1 = Joint Angle
 
@@ -114,7 +110,20 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     _targetReps = rx.reps;
     _minAllowedAngle = rx.minAngle;
     _maxAllowedAngle = rx.maxAngle;
-    _activeJoint = rx.exerciseId == 'shoulder_abduction' ? CocoJoint.rightShoulder : CocoJoint.rightKnee;
+
+    // Set initial active joint based on exercise type
+    final exId = rx.exerciseId.toLowerCase();
+    if (exId.contains('elbow')) {
+      _activeJoint = CocoJoint.rightElbow;
+    } else if (exId.contains('shoulder')) {
+      _activeJoint = CocoJoint.rightShoulder;
+    } else if (exId.contains('hip')) {
+      _activeJoint = CocoJoint.rightHip;
+    } else if (exId.contains('hand') || exId.contains('finger')) {
+      _activeJoint = CocoJoint.rightWrist;
+    } else {
+      _activeJoint = CocoJoint.rightKnee;
+    }
 
     _analysisEngine.reset();
 
@@ -123,9 +132,6 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
 
     // 2. Initialize Real Physical Camera
     await _openCamera();
-    if (!_cameraService.isInitialized) {
-      _startFallbackMotionEngine();
-    }
 
     // 3. Start Session Duration Timer
     _sessionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
@@ -153,10 +159,12 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
       } catch (e) {
         debugPrint('Camera stream note on this platform: $e');
       }
+    } else if (mounted) {
+      setState(() {});
     }
   }
 
-  /// Processes live camera frames from CameraController
+  /// Processes live camera frames from CameraController through real YOLO Pose model
   void _onCameraFrame(CameraImage image) async {
     if (_isPaused || !mounted) return;
 
@@ -222,36 +230,6 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     }
   }
 
-  /// Fallback motion engine for browsers / emulators without camera
-  void _startFallbackMotionEngine() {
-    bool isExtending = true;
-    double progress = 0.0;
-
-    _interactiveSimulationTimer = Timer.periodic(const Duration(milliseconds: 140), (timer) async {
-      if (_isPaused || !mounted) return;
-
-      if (isExtending) {
-        progress += 0.085;
-        final maxProgress = (_currentRep == 2) ? 0.42 : 0.95; // Rep 3 is shallow for demo
-        if (progress >= maxProgress) isExtending = false;
-      } else {
-        progress -= 0.085;
-        if (progress <= 0.04) isExtending = true;
-      }
-
-      final rx = ref.read(currentPrescriptionProvider) ?? ExercisePresets.kneeExtensionPrescription;
-      final pose = await _yoloService.processInteractiveMotion(
-        viewportSize: _viewportSize,
-        exerciseId: rx.exerciseId,
-        motionProgress: progress,
-      );
-
-      if (mounted) {
-        _applyFrameAnalysis(pose, rx);
-      }
-    });
-  }
-
   void _updateGraphData() {
     double nextValue;
     if (_graphMetricIndex == 0) {
@@ -275,7 +253,6 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
 
   void _finishSession() {
     _sessionTimer?.cancel();
-    _interactiveSimulationTimer?.cancel();
     _cameraService.stopImageStream();
 
     final rx = ref.read(currentPrescriptionProvider) ?? ExercisePresets.kneeExtensionPrescription;
@@ -442,16 +419,15 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   @override
   void dispose() {
     _sessionTimer?.cancel();
-    _interactiveSimulationTimer?.cancel();
     _pulseController.dispose();
     _cameraService.dispose();
+    _yoloService.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final rx = ref.watch(currentPrescriptionProvider) ?? ExercisePresets.kneeExtensionPrescription;
-    final isShoulder = rx.exerciseId == 'shoulder_abduction';
 
     return ResponsiveScreenFrame(
       maxWidth: 540,
@@ -461,7 +437,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
         body: SafeArea(
           child: Column(
             children: [
-              // 1. COMPACT TOP HEADER
+              // 1. TOP HEADER (LIVE + Set + Camera Flip + Voice Coach + Debug Toggle)
               _buildTopHeader(rx),
 
               // 2. TOP 50–55%: REAL CAMERA + YOLO SKELETON (HERO VIEW)
@@ -474,10 +450,10 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                     return Stack(
                       fit: StackFit.expand,
                       children: [
-                        // A. Real Android Camera Feed
+                        // A. Continuous Live Camera Preview
                         _buildCameraFeedBackground(),
 
-                        // B. Real YOLO Pose Skeleton Overlay
+                        // B. Real YOLO Pose 17-Keypoint Skeleton Overlay
                         CustomPaint(
                           painter: PoseSkeletonPainter(
                             pose: _currentPose,
@@ -492,28 +468,50 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                           ),
                         ),
 
-                        // C. Centered Small Prompt if No Person Detected or Knee Occluded
+                        // C. Centered Small Prompt if No Person Detected or Joint Occluded
                         if (!_currentPose.isPersonDetected)
                           _buildNoPersonOverlay()
                         else if (_isOccluded)
                           _buildOcclusionOverlay(),
 
-                        // D. Top Translucent Info Pill: Joint Angle & Target ROM
+                        // D. Top-Left Translucent Info Pill: Joint Angle & Target ROM
                         Positioned(
                           top: 10,
                           left: 12,
                           child: _buildAngleRomIndicator(
-                            jointLabel: isShoulder ? 'Arm' : 'Knee',
+                            jointLabel: rx.targetJointName,
                           ),
                         ),
 
-                        // E. Bottom-Center: Translucent Live Form Status Pill
+                        // E. Top-Right: Person Detection Status & Vision AI Status Badges
+                        Positioned(
+                          top: 10,
+                          right: 12,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              _buildPersonDetectionStatusChip(),
+                              const SizedBox(height: 4),
+                              _buildVisionAiStatusBadge(),
+                            ],
+                          ),
+                        ),
+
+                        // F. Bottom-Center: Translucent Live Form Status Pill
                         Positioned(
                           bottom: 10,
                           left: 16,
                           right: 16,
                           child: _buildFloatingStatusPill(),
                         ),
+
+                        // G. Developer / Debug Telemetry Panel Overlay
+                        if (_showDebugPanel)
+                          Positioned(
+                            bottom: 56,
+                            right: 12,
+                            child: _buildDebugTelemetryPanel(rx),
+                          ),
                       ],
                     );
                   },
@@ -666,6 +664,21 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
               if (!_voiceEnabled) TtsService().stop();
             },
           ),
+
+          // Developer Debug Telemetry Toggle
+          IconButton(
+            icon: Icon(
+              Icons.bug_report_rounded,
+              color: _showDebugPanel ? AppColors.success : Colors.white38,
+              size: 19,
+            ),
+            tooltip: 'Debug Telemetry',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            onPressed: () {
+              setState(() => _showDebugPanel = !_showDebugPanel);
+            },
+          ),
         ],
       ),
     );
@@ -697,39 +710,80 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
       );
     }
 
-    // Camera initializing / tap to open
+    // Permission Denied or Camera Error state
+    if (_cameraService.permissionDenied) {
+      return Container(
+        color: const Color(0xFF0C0E12),
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.no_photography_rounded, size: 48, color: AppColors.error),
+              const SizedBox(height: 12),
+              const Text(
+                'CAMERA ACCESS DENIED',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                  letterSpacing: 0.5,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                _cameraService.errorMessage ??
+                    'Camera permission is required for real-time YOLO pose monitoring.',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                label: const Text('GRANT PERMISSION & RETRY'),
+                onPressed: () async {
+                  await _openCamera();
+                  if (mounted) setState(() {});
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Camera initializing
     return Container(
       color: const Color(0xFF0C0E12),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00E676),
-                foregroundColor: Colors.black,
-                padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 4,
+            const CircularProgressIndicator(color: AppColors.primaryLight, strokeWidth: 2.5),
+            const SizedBox(height: 14),
+            const Text(
+              'STARTING CAMERA & YOLO POSE...',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.8,
               ),
-              icon: const Icon(Icons.videocam_rounded, size: 24, color: Colors.black),
-              label: const Text(
-                'OPEN CAMERA',
-                style: TextStyle(
-                  fontWeight: FontWeight.w900,
-                  fontSize: 14,
-                  letterSpacing: 0.8,
-                ),
-              ),
+            ),
+            const SizedBox(height: 12),
+            TextButton.icon(
+              icon: const Icon(Icons.videocam_rounded, size: 18, color: AppColors.primaryLight),
+              label: const Text('Retry Camera Initialization', style: TextStyle(color: AppColors.primaryLight)),
               onPressed: () async {
                 await _openCamera();
                 if (mounted) setState(() {});
               },
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Tap to grant camera access and start live tracking',
-              style: TextStyle(color: Colors.white54, fontSize: 11),
             ),
           ],
         ),
@@ -737,13 +791,13 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     );
   }
 
-  /// Compact Translucent Info Bar: Joint Angle + Target ROM (Non-obstructive)
+  /// Compact Translucent Info Bar: Joint Angle + Target ROM
   Widget _buildAngleRomIndicator({required String jointLabel}) {
     final bool inRange = _isMovementCorrect;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.72),
+        color: Colors.black.withOpacity(0.78),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: inRange
@@ -761,7 +815,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                 : '$jointLabel ${_currentAngle.toStringAsFixed(0)}°',
             style: TextStyle(
               color: inRange ? const Color(0xFF10B981) : Colors.white,
-              fontSize: 16,
+              fontSize: 15,
               fontWeight: FontWeight.w900,
             ),
           ),
@@ -783,7 +837,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
               'Target ${_minAllowedAngle.toInt()}°–${_maxAllowedAngle.toInt()}°',
               style: TextStyle(
                 color: inRange ? const Color(0xFF10B981) : AppColors.primaryLight,
-                fontSize: 10.5,
+                fontSize: 10,
                 fontWeight: FontWeight.w800,
               ),
             ),
@@ -793,7 +847,167 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     );
   }
 
-  /// Floating Status Pill: Translucent, High-Contrast Coaching Prompt
+  /// Section 4: Person Detection Status Chip
+  Widget _buildPersonDetectionStatusChip() {
+    final isDetected = _currentPose.isPersonDetected;
+    final conf = _currentPose.personConfidence;
+    final isLowConf = isDetected && conf < 0.45;
+
+    Color badgeColor;
+    String titleText;
+    String subText;
+
+    if (!isDetected) {
+      badgeColor = AppColors.error;
+      titleText = 'NO PERSON DETECTED';
+      subText = 'Move into camera view';
+    } else if (isLowConf) {
+      badgeColor = AppColors.warning;
+      titleText = 'LOW CONFIDENCE';
+      subText = 'Improve lighting or camera position';
+    } else {
+      badgeColor = AppColors.success;
+      titleText = 'PERSON DETECTED';
+      subText = 'Confidence: ${conf.toStringAsFixed(2)}';
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.80),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: badgeColor.withOpacity(0.8), width: 1.0),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: badgeColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                titleText,
+                style: TextStyle(
+                  color: badgeColor,
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 0.4,
+                ),
+              ),
+            ],
+          ),
+          Text(
+            subText,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 8.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Section 9: Vision AI Status Badge
+  Widget _buildVisionAiStatusBadge() {
+    final status = _yoloService.aiStatus;
+    Color statusColor;
+    String statusLabel;
+
+    switch (status) {
+      case VisionAiStatus.active:
+        statusColor = AppColors.success;
+        statusLabel = 'ACTIVE';
+        break;
+      case VisionAiStatus.initializing:
+        statusColor = AppColors.warning;
+        statusLabel = 'INITIALIZING';
+        break;
+      case VisionAiStatus.error:
+        statusColor = AppColors.error;
+        statusLabel = 'ERROR';
+        break;
+      case VisionAiStatus.unloaded:
+        statusColor = Colors.white38;
+        statusLabel = 'STANDBY';
+        break;
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.80),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 5,
+            height: 5,
+            decoration: BoxDecoration(
+              color: statusColor,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Vision AI: $statusLabel',
+            style: TextStyle(
+              color: statusColor,
+              fontSize: 9,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Section 14: Developer Debug Telemetry Panel
+  Widget _buildDebugTelemetryPanel(Prescription rx) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.88),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.primaryLight.withOpacity(0.5)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'DEBUG TELEMETRY',
+            style: TextStyle(color: AppColors.primaryLight, fontSize: 9.5, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 3),
+          Text('FPS: ${_yoloService.fps.toStringAsFixed(1)}', style: const TextStyle(color: Colors.white, fontSize: 9)),
+          Text('Person: ${_currentPose.isPersonDetected ? "YES" : "NO"}', style: const TextStyle(color: Colors.white, fontSize: 9)),
+          Text('Confidence: ${_currentPose.personConfidence.toStringAsFixed(2)}', style: const TextStyle(color: Colors.white, fontSize: 9)),
+          Text('Keypoints: ${_currentPose.visibleKeypointCount}/17', style: const TextStyle(color: Colors.white, fontSize: 9)),
+          Text('${rx.targetJointName} Angle: ${_currentAngle.toStringAsFixed(0)}°', style: const TextStyle(color: Colors.white, fontSize: 9)),
+          Text('Exercise State: ${_analysisEngine.currentPhase.name.toUpperCase()}', style: const TextStyle(color: Colors.white, fontSize: 9)),
+          Text('Rep Count: $_currentRep/$_targetReps', style: const TextStyle(color: Colors.white, fontSize: 9)),
+          Text('Model: ${_yoloService.isModelLoaded ? "LOADED" : "ERROR"}', style: const TextStyle(color: Colors.white, fontSize: 9)),
+          Text('Camera: ${_cameraService.isInitialized ? "ACTIVE" : "INACTIVE"}', style: const TextStyle(color: Colors.white, fontSize: 9)),
+        ],
+      ),
+    );
+  }
+
+  /// Floating Status Pill: Translucent, High-Contrast Coaching Prompt (✓ GOOD REP / ✕ INCORRECT)
   Widget _buildFloatingStatusPill() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -821,7 +1035,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w800,
-                fontSize: 14,
+                fontSize: 13.5,
                 letterSpacing: 0.3,
               ),
               textAlign: TextAlign.center,
@@ -833,14 +1047,14 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     );
   }
 
-  /// Centered Subtle "Position yourself in front of the camera" Prompt
+  /// Centered Subtle "Move into camera view" Prompt
   Widget _buildNoPersonOverlay() {
     return Center(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 36),
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.70),
+          color: Colors.black.withOpacity(0.75),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: Colors.white24, width: 1.0),
         ),
@@ -858,7 +1072,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     );
   }
 
-  /// Centered "Knee Not Detected" Prompt (Section 11)
+  /// Centered "Joint Not Detected" Prompt
   Widget _buildOcclusionOverlay() {
     return Center(
       child: Container(
@@ -875,12 +1089,12 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
             Icon(Icons.visibility_off_rounded, color: AppColors.warning, size: 30),
             SizedBox(height: 6),
             Text(
-              'KNEE NOT DETECTED',
+              'TARGET JOINT NOT DETECTED',
               style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900),
             ),
             SizedBox(height: 2),
             Text(
-              'Adjust your position',
+              'Adjust your position to keep limb in camera view',
               style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ],
@@ -893,21 +1107,10 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   // 3. LEFT PANEL = HOW TO DO (Bottom Left 50%)
   // =========================================================================
   Widget _buildHowToPanel(Prescription rx) {
-    final isKnee = rx.exerciseId.contains('knee');
-
-    final steps = isKnee
-        ? [
-            '1. Sit upright on firm chair',
-            '2. Keep your thigh still',
-            '3. Slowly extend your knee',
-            '4. Lower leg with control',
-          ]
-        : [
-            '1. Stand or sit tall',
-            '2. Keep your torso still',
-            '3. Raise arm to shoulder level',
-            '4. Lower arm down slowly',
-          ];
+    final instructionsList = rx.instructions
+        .split('\n')
+        .where((s) => s.trim().isNotEmpty)
+        .toList();
 
     return Container(
       decoration: BoxDecoration(
@@ -957,15 +1160,15 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                       ),
                       const SizedBox(height: 8),
 
-                      // Step-by-step instructions (Large, elderly-friendly)
-                      ...steps.map(
+                      // Step-by-step instructions
+                      ...instructionsList.map(
                         (step) => Padding(
-                          padding: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.only(bottom: 5),
                           child: Text(
                             step,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 12.5,
+                              fontSize: 12,
                               fontWeight: FontWeight.w600,
                               height: 1.25,
                             ),
@@ -1086,7 +1289,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                       ),
                       const SizedBox(height: 6),
 
-                      // Sensor Biosignal Rows (No fake values - Section 8)
+                      // Sensor Biosignal Rows
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1119,7 +1322,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                       Container(height: 1, color: Colors.white10),
                       const SizedBox(height: 6),
 
-                      // ONE Compact Live Graph Header
+                      // Live Graph Header
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1148,7 +1351,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                       ),
                       const SizedBox(height: 2),
 
-                      // ONE Compact Sensor Graph (Non-dominating)
+                      // Compact Sensor Graph
                       SizedBox(
                         height: 32,
                         width: double.infinity,
@@ -1161,7 +1364,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                       ),
                       const SizedBox(height: 6),
 
-                      // Rep & Form Metric Indicators (Section 8 & 9)
+                      // Rep & Angle Metrics
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1177,7 +1380,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                               border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.35)),
                             ),
                             child: Text(
-                              'POSE ${(_currentPose.personConfidence * 100).toInt()}%',
+                              'ANGLE ${_currentAngle.toStringAsFixed(0)}°',
                               style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 9.5, fontWeight: FontWeight.w900),
                             ),
                           ),
@@ -1306,7 +1509,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   }
 }
 
-/// Lightweight painter for the single live sensor graph.
+/// Lightweight painter for the live sensor graph.
 class _MiniSensorGraphPainter extends CustomPainter {
   final List<double> data;
   final Color lineColor;

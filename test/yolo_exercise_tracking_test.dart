@@ -41,7 +41,7 @@ void main() {
       final midPose = _createShoulderPose(armAngleDeg: 48.0);
       result = engine.analyzeFrame(pose: midPose, prescription: rx);
       expect(engine.currentPhase, equals(RepCyclePhase.movingOut));
-      expect(result.statusText, equals('Raise your arm higher'));
+      expect(result.statusText, contains('Raise your arm higher'));
 
       // Step C: Arm in target range (92°)
       final targetPose = _createShoulderPose(armAngleDeg: 92.0);
@@ -57,6 +57,7 @@ void main() {
       expect(result.repCompleted, isTrue);
       expect(result.repWasCorrect, isTrue);
       expect(result.verdict, equals(RepVerdict.correct));
+      expect(result.statusText, equals('✓ GOOD REP'));
       expect(result.spokenCue, equals('Good rep'));
     });
 
@@ -75,7 +76,7 @@ void main() {
       expect(result.repCompleted, isTrue);
       expect(result.repWasCorrect, isFalse);
       expect(result.verdict, equals(RepVerdict.tooShallow));
-      expect(result.statusText, equals('Raise your arm higher'));
+      expect(result.statusText, contains('Raise your arm higher'));
     });
 
     test('Test 4: Excessive Shoulder Abduction (overshoots to 125°) prompts "Lower your arm slightly"', () {
@@ -86,7 +87,7 @@ void main() {
 
       // Overshoot to 125°
       final overshootResult = engine.analyzeFrame(pose: _createShoulderPose(armAngleDeg: 125.0), prescription: rx);
-      expect(overshootResult.statusText, equals('Lower your arm slightly'));
+      expect(overshootResult.statusText, contains('Lower your arm slightly'));
 
       // Return to rest
       final result = engine.analyzeFrame(pose: _createShoulderPose(armAngleDeg: 20.0), prescription: rx);
@@ -184,7 +185,7 @@ void main() {
       expect(pose.pelvisPosition!.dy, closeTo(expectedPelvisY, 0.01));
     });
 
-    test('Test 8: Knee Extension in prescribed 80°-160° range evaluates Vector 1 and Vector 2 angle and gives "Good movement"', () {
+    test('Test 8: Knee Extension in prescribed 80°-160° range evaluates Vector 1 and Vector 2 angle and gives "✓ GOOD FORM" and "✓ GOOD REP"', () {
       final rx = ExercisePresets.kneeExtensionPrescription; // min: 80, max: 160
 
       // Step A: Rest position (~90°)
@@ -193,14 +194,14 @@ void main() {
       expect(result.jointDisplayName, equals('KNEE ANGLE'));
       expect(result.activeJoint, equals(CocoJoint.rightKnee));
 
-      // Step B: Extending leg into target zone (142°) - Section 4 example
+      // Step B: Extending leg into target zone (142°)
       final targetPose = _createKneePose(kneeAngleDeg: 142.0);
       result = engine.analyzeFrame(pose: targetPose, prescription: rx);
 
       expect(result.angle, closeTo(142.0, 1.0));
       expect(result.isMovementCorrect, isTrue);
       expect(result.feedbackCategory, equals('CORRECT'));
-      expect(result.statusText, equals('Good movement'));
+      expect(result.statusText, equals('✓ GOOD FORM'));
       expect(result.statusColor, equals(const Color(0xFF10B981))); // Green
 
       // Step C: Returning leg back to rest (90°)
@@ -208,17 +209,15 @@ void main() {
       expect(result.repCompleted, isTrue);
       expect(result.repWasCorrect, isTrue);
       expect(result.verdict, equals(RepVerdict.correct));
-      expect(result.statusText, equals('1 REP COMPLETED'));
+      expect(result.statusText, equals('✓ GOOD REP'));
     });
 
-    test('Test 9: Knee Extension below 80° prompts "Extend a little more"', () {
+    test('Test 9: Knee Extension below 80° prompts "Straighten your knee"', () {
       final rx = ExercisePresets.kneeExtensionPrescription;
 
       // Rest
       engine.analyzeFrame(pose: _createKneePose(kneeAngleDeg: 90.0), prescription: rx);
 
-      // Shallow lift (108° - above restThreshold + 8 but below minAngle 80°? Wait, for knee extension minAngle is 80 and seated rest is 90)
-      // When lifting, if peak only reached 100° (no extension), returning does not award valid rep:
       final shallowPose = _createKneePose(kneeAngleDeg: 100.0);
       final shallowResult = engine.analyzeFrame(pose: shallowPose, prescription: rx);
       expect(shallowResult.repCompleted, isFalse);
@@ -236,7 +235,7 @@ void main() {
 
       expect(result.isMovementCorrect, isFalse);
       expect(result.feedbackCategory, equals('INCORRECT'));
-      expect(result.statusText, equals('Do not extend that far'));
+      expect(result.statusText, contains('Do not extend that far'));
       expect(result.statusColor, equals(const Color(0xFFEF4444))); // Red
     });
 
@@ -276,6 +275,70 @@ void main() {
       final resumedResult = engine.analyzeFrame(pose: visiblePose, prescription: rx);
       expect(resumedResult.isOccluded, isFalse);
       expect(resumedResult.angle, closeTo(135.0, 1.0));
+    });
+
+    test('Test 12: Elbow Exercise calculates Shoulder -> Elbow -> Wrist and evaluates flexion/extension', () {
+      final rx = ExercisePresets.elbowExercisePrescription; // min: 30, max: 150
+
+      // Step A: Arm extended at rest (160°)
+      final restPose = _createElbowPose(elbowAngleDeg: 160.0);
+      var result = engine.analyzeFrame(pose: restPose, prescription: rx);
+      expect(result.jointDisplayName, equals('ELBOW ANGLE'));
+      expect(result.activeJoint, equals(CocoJoint.rightElbow));
+
+      // Step B: Flexing elbow into target zone (70°)
+      final flexPose = _createElbowPose(elbowAngleDeg: 70.0);
+      result = engine.analyzeFrame(pose: flexPose, prescription: rx);
+      expect(result.angle, closeTo(70.0, 1.0));
+      expect(result.isMovementCorrect, isTrue);
+      expect(result.statusText, equals('✓ GOOD FORM'));
+
+      // Step C: Returning to extension (160°) completes rep
+      result = engine.analyzeFrame(pose: restPose, prescription: rx);
+      expect(result.repCompleted, isTrue);
+      expect(result.repWasCorrect, isTrue);
+      expect(result.statusText, equals('✓ GOOD REP'));
+    });
+
+    test('Test 13: Hip Exercise calculates Shoulder -> Hip -> Knee and evaluates hip flexion', () {
+      final rx = ExercisePresets.hipExercisePrescription; // min: 45, max: 120
+
+      // Step A: Standing upright (~175°)
+      final restPose = _createHipPose(hipAngleDeg: 175.0);
+      var result = engine.analyzeFrame(pose: restPose, prescription: rx);
+      expect(result.jointDisplayName, equals('HIP ANGLE'));
+      expect(result.activeJoint, equals(CocoJoint.rightHip));
+
+      // Step B: Lifting thigh into target hip flexion (90°)
+      final flexPose = _createHipPose(hipAngleDeg: 90.0);
+      result = engine.analyzeFrame(pose: flexPose, prescription: rx);
+      expect(result.angle, closeTo(90.0, 1.0));
+      expect(result.isMovementCorrect, isTrue);
+      expect(result.statusText, equals('✓ GOOD FORM'));
+
+      // Step C: Lowering leg back down completes rep
+      result = engine.analyzeFrame(pose: restPose, prescription: rx);
+      expect(result.repCompleted, isTrue);
+      expect(result.repWasCorrect, isTrue);
+      expect(result.statusText, equals('✓ GOOD REP'));
+    });
+
+    test('Test 14: Rep counting state machine prevents duplicate counting while user holds in target position', () {
+      final rx = ExercisePresets.kneeExtensionPrescription;
+
+      // User extends into target zone (142°)
+      final targetPose = _createKneePose(kneeAngleDeg: 142.0);
+
+      // Simulate holding position for 10 consecutive frames
+      for (int i = 0; i < 10; i++) {
+        final result = engine.analyzeFrame(pose: targetPose, prescription: rx);
+        expect(result.repCompleted, isFalse, reason: 'Holding in target zone should NOT trigger rep completed!');
+      }
+
+      // User returns to rest (90°)
+      final restPose = _createKneePose(kneeAngleDeg: 90.0);
+      final finalResult = engine.analyzeFrame(pose: restPose, prescription: rx);
+      expect(finalResult.repCompleted, isTrue, reason: 'Rep must ONLY increment upon completing movement cycle!');
     });
   });
 }
@@ -329,7 +392,6 @@ DetectedPose _createKneePose({required double kneeAngleDeg}) {
   const cy = 300.0;
   final rad = (kneeAngleDeg * math.pi) / 180.0;
 
-  // Active right leg: seated posture with horizontal thigh
   const kneeX = cx + 50.0;
   const kneeY = cy + 50.0;
   const thighLength = 70.0;
@@ -342,7 +404,6 @@ DetectedPose _createKneePose({required double kneeAngleDeg}) {
   final ankleY = kneeY + shankLength * math.sin(math.pi - rad);
   final rAnkle = PoseKeypoint(joint: CocoJoint.rightAnkle, x: ankleX, y: ankleY, confidence: 0.95);
 
-  // Resting left leg seated at 90 degrees
   final lHip = const PoseKeypoint(joint: CocoJoint.leftHip, x: cx - 40, y: cy + 50, confidence: 0.95);
   final lKnee = const PoseKeypoint(joint: CocoJoint.leftKnee, x: cx - 10, y: cy + 50, confidence: 0.95);
   final lAnkle = const PoseKeypoint(joint: CocoJoint.leftAnkle, x: cx - 10, y: cy + 120, confidence: 0.95);
@@ -374,5 +435,91 @@ DetectedPose _createKneePose({required double kneeAngleDeg}) {
     isPersonDetected: true,
     measuredAngle: kneeAngleDeg,
     targetJointName: 'Knee',
+  );
+}
+
+/// Helper to create synthetic 17-keypoint pose for elbow exercise (Shoulder -> Elbow -> Wrist)
+DetectedPose _createElbowPose({required double elbowAngleDeg}) {
+  const cx = 200.0;
+  const cy = 300.0;
+  final rad = (elbowAngleDeg * math.pi) / 180.0;
+
+  final rShoulder = const PoseKeypoint(joint: CocoJoint.rightShoulder, x: cx + 40, y: cy - 80, confidence: 0.95);
+  final rElbow = const PoseKeypoint(joint: CocoJoint.rightElbow, x: cx + 40, y: cy - 20, confidence: 0.95);
+
+  final wristX = (cx + 40) + (55.0 * math.sin(rad));
+  final wristY = (cy - 20) - (55.0 * math.cos(rad));
+  final rWrist = PoseKeypoint(joint: CocoJoint.rightWrist, x: wristX, y: wristY, confidence: 0.95);
+
+  final keypoints = [
+    const PoseKeypoint(joint: CocoJoint.nose, x: cx, y: cy - 130, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftEye, x: cx - 10, y: cy - 140, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightEye, x: cx + 10, y: cy - 140, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftEar, x: cx - 20, y: cy - 135, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightEar, x: cx + 20, y: cy - 135, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftShoulder, x: cx - 40, y: cy - 80, confidence: 0.95),
+    rShoulder,
+    const PoseKeypoint(joint: CocoJoint.leftElbow, x: cx - 50, y: cy - 20, confidence: 0.95),
+    rElbow,
+    const PoseKeypoint(joint: CocoJoint.leftWrist, x: cx - 50, y: cy + 35, confidence: 0.95),
+    rWrist,
+    const PoseKeypoint(joint: CocoJoint.leftHip, x: cx - 25, y: cy + 30, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightHip, x: cx + 25, y: cy + 30, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftKnee, x: cx - 25, y: cy + 115, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightKnee, x: cx + 25, y: cy + 115, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftAnkle, x: cx - 25, y: cy + 195, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightAnkle, x: cx + 25, y: cy + 195, confidence: 0.95),
+  ];
+
+  return DetectedPose(
+    keypoints: keypoints,
+    boundingBox: const Rect.fromLTRB(100, 150, 300, 520),
+    personConfidence: 0.95,
+    isPersonDetected: true,
+    measuredAngle: elbowAngleDeg,
+    targetJointName: 'Elbow',
+  );
+}
+
+/// Helper to create synthetic 17-keypoint pose for hip exercise (Shoulder -> Hip -> Knee)
+DetectedPose _createHipPose({required double hipAngleDeg}) {
+  const cx = 200.0;
+  const cy = 300.0;
+  final rad = (hipAngleDeg * math.pi) / 180.0;
+
+  final rShoulder = const PoseKeypoint(joint: CocoJoint.rightShoulder, x: cx + 30, y: cy - 80, confidence: 0.95);
+  final rHip = const PoseKeypoint(joint: CocoJoint.rightHip, x: cx + 30, y: cy + 30, confidence: 0.95);
+
+  final kneeX = (cx + 30) + (70.0 * math.sin(math.pi - rad));
+  final kneeY = (cy + 30) + (70.0 * math.cos(math.pi - rad));
+  final rKnee = PoseKeypoint(joint: CocoJoint.rightKnee, x: kneeX, y: kneeY, confidence: 0.95);
+
+  final keypoints = [
+    const PoseKeypoint(joint: CocoJoint.nose, x: cx, y: cy - 130, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftEye, x: cx - 10, y: cy - 140, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightEye, x: cx + 10, y: cy - 140, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftEar, x: cx - 20, y: cy - 135, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightEar, x: cx + 20, y: cy - 135, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftShoulder, x: cx - 30, y: cy - 80, confidence: 0.95),
+    rShoulder,
+    const PoseKeypoint(joint: CocoJoint.leftElbow, x: cx - 45, y: cy - 20, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightElbow, x: cx + 45, y: cy - 20, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftWrist, x: cx - 45, y: cy + 35, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightWrist, x: cx + 45, y: cy + 35, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.leftHip, x: cx - 30, y: cy + 30, confidence: 0.95),
+    rHip,
+    const PoseKeypoint(joint: CocoJoint.leftKnee, x: cx - 30, y: cy + 115, confidence: 0.95),
+    rKnee,
+    const PoseKeypoint(joint: CocoJoint.leftAnkle, x: cx - 30, y: cy + 195, confidence: 0.95),
+    const PoseKeypoint(joint: CocoJoint.rightAnkle, x: cx + 30, y: cy + 195, confidence: 0.95),
+  ];
+
+  return DetectedPose(
+    keypoints: keypoints,
+    boundingBox: const Rect.fromLTRB(100, 150, 300, 520),
+    personConfidence: 0.95,
+    isPersonDetected: true,
+    measuredAngle: hipAngleDeg,
+    targetJointName: 'Hip',
   );
 }

@@ -2,7 +2,7 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 
 /// Camera initialization, front/back camera selection,
-/// and live frame streaming service for real-time YOLO pose monitoring.
+/// permission handling, and live frame streaming service for real-time YOLO pose monitoring.
 class CameraService {
   static final CameraService _instance = CameraService._internal();
   factory CameraService() => _instance;
@@ -11,11 +11,15 @@ class CameraService {
   CameraController? _controller;
   bool _isInitialized = false;
   bool _isStreaming = false;
+  bool _permissionDenied = false;
+  String? _errorMessage;
   List<CameraDescription> _availableCameras = [];
   int _selectedCameraIndex = 0;
 
   bool get isInitialized => _isInitialized && _controller != null;
   bool get isStreaming => _isStreaming;
+  bool get permissionDenied => _permissionDenied;
+  String? get errorMessage => _errorMessage;
   CameraController? get controller => _controller;
   bool get isFrontCamera =>
       _controller?.description.lensDirection == CameraLensDirection.front;
@@ -25,16 +29,20 @@ class CameraService {
   /// Initializes the physical camera.
   /// Prefers front camera for self-monitoring rehabilitation experience.
   Future<bool> initialize() async {
+    _permissionDenied = false;
+    _errorMessage = null;
+
     try {
       _availableCameras = await availableCameras();
       if (_availableCameras.isEmpty) {
-        // On web, availableCameras() might need a brief retry after permissions initialize
+        // On web / slow devices, availableCameras() might need a brief retry
         await Future.delayed(const Duration(milliseconds: 300));
         _availableCameras = await availableCameras();
       }
       if (_availableCameras.isEmpty) {
         debugPrint('No physical cameras found on this system.');
         _isInitialized = false;
+        _errorMessage = 'No camera device found on this system.';
         return false;
       }
 
@@ -49,15 +57,29 @@ class CameraService {
       _selectedCameraIndex = targetIndex;
 
       return await _initializeController(_availableCameras[_selectedCameraIndex]);
+    } on CameraException catch (e) {
+      debugPrint('CameraService exception: ${e.code} - ${e.description}');
+      if (e.code == 'CameraAccessDenied' || e.code == 'cameraPermission') {
+        _permissionDenied = true;
+        _errorMessage = 'Camera permission denied. Please grant camera access in settings.';
+      } else {
+        _errorMessage = e.description ?? e.code;
+      }
+      _isInitialized = false;
+      return false;
     } catch (e) {
       debugPrint('CameraService initialization warning: $e');
       _isInitialized = false;
+      _errorMessage = e.toString();
       return false;
     }
   }
 
   Future<bool> _initializeController(CameraDescription camera) async {
     try {
+      if (_isStreaming) {
+        await stopImageStream();
+      }
       await _controller?.dispose();
 
       _controller = CameraController(
@@ -73,10 +95,22 @@ class CameraService {
 
       await _controller!.initialize();
       _isInitialized = true;
+      _permissionDenied = false;
       return true;
+    } on CameraException catch (e) {
+      debugPrint('Failed to initialize CameraController: ${e.code}');
+      if (e.code == 'CameraAccessDenied' || e.code == 'cameraPermission') {
+        _permissionDenied = true;
+        _errorMessage = 'Camera permission was denied. Tap to retry or enable in settings.';
+      } else {
+        _errorMessage = e.description ?? e.code;
+      }
+      _isInitialized = false;
+      return false;
     } catch (e) {
       debugPrint('Failed to initialize CameraController: $e');
       _isInitialized = false;
+      _errorMessage = e.toString();
       return false;
     }
   }

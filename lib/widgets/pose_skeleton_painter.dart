@@ -1,18 +1,16 @@
 import 'package:flutter/material.dart';
+import '../core/theme/color_palette.dart';
 import '../domain/models/detected_pose.dart';
 import '../domain/models/pose_keypoint.dart';
 
-/// Minimal, clinical-grade joint tracking overlay.
+/// Professional, clinical-grade YOLO Pose 17-Keypoint Skeleton Overlay.
 /// 
-/// Strictly adheres to:
-/// - NO cyan bounding box
-/// - NO full artificial skeleton
-/// - NO floating head or irrelevant body points
-/// - NO angle arc or mathematical construction
-/// - ONLY thin green tracking lines along relevant active joints (Hip -> Knee -> Ankle or Shoulder -> Elbow -> Wrist)
-/// - ONLY small green circular joint markers (with active knee slightly larger)
-/// - Clean "Knee 90°" text readout beside the knee
-/// - Minimal, unobtrusive confidence indicator
+/// Renders:
+/// - 17 Human Body Keypoint Circles (Head, Shoulders, Elbows, Wrists, Hips, Knees, Ankles)
+/// - Anatomical Skeleton Connection Lines
+/// - Person Bounding Box with Detection Confidence
+/// - Active Exercise Joint Highlight with Dynamic Pulsing Ring
+/// - Clean Joint Angle Readout (e.g. "Knee Angle: 142°")
 class PoseSkeletonPainter extends CustomPainter {
   final DetectedPose pose;
   final double pulseValue;
@@ -36,225 +34,327 @@ class PoseSkeletonPainter extends CustomPainter {
     this.isOccluded = false,
   });
 
-  // Clinical Green Palette
-  static const Color trackingGreen = Color(0xFF00E676); // High-visibility medical green
-  static const Color darkOverlayBg = Color(0xCC0B1220);
+  // Color Palette
+  static const Color cyanTracking = Color(0xFF00E5FF);
+  static const Color orangeTracking = Color(0xFFFF6B35);
+  static const Color greenTracking = Color(0xFF00E676);
+  static const Color activeHaloGreen = Color(0x5500E676);
+  static const Color activeHaloOrange = Color(0x55FF6B35);
+
+  // Standard 19 COCO Anatomical Connections
+  static const List<List<CocoJoint>> _skeletonConnections = [
+    // Head / Facial
+    [CocoJoint.nose, CocoJoint.leftEye],
+    [CocoJoint.nose, CocoJoint.rightEye],
+    [CocoJoint.leftEye, CocoJoint.leftEar],
+    [CocoJoint.rightEye, CocoJoint.rightEar],
+
+    // Torso / Collar
+    [CocoJoint.leftShoulder, CocoJoint.rightShoulder],
+    [CocoJoint.leftShoulder, CocoJoint.leftHip],
+    [CocoJoint.rightShoulder, CocoJoint.rightHip],
+    [CocoJoint.leftHip, CocoJoint.rightHip],
+
+    // Left Arm
+    [CocoJoint.leftShoulder, CocoJoint.leftElbow],
+    [CocoJoint.leftElbow, CocoJoint.leftWrist],
+
+    // Right Arm
+    [CocoJoint.rightShoulder, CocoJoint.rightElbow],
+    [CocoJoint.rightElbow, CocoJoint.rightWrist],
+
+    // Left Leg
+    [CocoJoint.leftHip, CocoJoint.leftKnee],
+    [CocoJoint.leftKnee, CocoJoint.leftAnkle],
+
+    // Right Leg
+    [CocoJoint.rightHip, CocoJoint.rightKnee],
+    [CocoJoint.rightKnee, CocoJoint.rightAnkle],
+  ];
 
   @override
   void paint(Canvas canvas, Size size) {
-    // If no person detected or keypoints empty, show NOTHING on camera
     if (!pose.isPersonDetected || pose.keypoints.isEmpty) return;
 
-    final isShoulder = exerciseId == 'shoulder_abduction';
+    final keypointMap = pose.keypointMap;
 
-    if (isShoulder) {
-      _drawArmTracking(canvas);
-    } else {
-      _drawKneeExtensionTracking(canvas);
-    }
+    // 1. Draw Person Bounding Box if detected
+    _drawBoundingBox(canvas);
 
-    // Display clean joint angle label close to the active joint: "Knee 90°"
-    // No angle arc or mathematical construction
+    // 2. Draw Skeleton Connection Lines
+    _drawSkeletonConnections(canvas, keypointMap);
+
+    // 3. Draw All 17 Keypoint Circles
+    _drawKeypointCircles(canvas);
+
+    // 4. Draw Active Joint Angle Readout beside active joint
     if (!isOccluded && measuredAngle > 0.0) {
-      _drawCleanAngleLabel(canvas, isShoulder: isShoulder);
+      _drawActiveJointAngleLabel(canvas, keypointMap);
     }
-
-    // Minimal pose confidence indicator in top-right corner of camera frame
-    _drawMinimalConfidence(canvas, size);
   }
 
-  /// Knee Extension: Prioritizes ONLY HIP -> KNEE -> ANKLE
-  void _drawKneeExtensionTracking(Canvas canvas) {
-    final isRight = activeJoint == CocoJoint.rightKnee;
-    final hipJoint = isRight ? CocoJoint.rightHip : CocoJoint.leftHip;
-    final kneeJoint = isRight ? CocoJoint.rightKnee : CocoJoint.leftKnee;
-    final ankleJoint = isRight ? CocoJoint.rightAnkle : CocoJoint.leftAnkle;
+  /// Draws person bounding box with confidence badge
+  void _drawBoundingBox(Canvas canvas) {
+    final box = pose.boundingBox;
+    if (box == Rect.zero || box.width <= 10 || box.height <= 10) return;
 
-    final hip = pose.getKeypoint(hipJoint);
-    final knee = pose.getKeypoint(kneeJoint);
-    final ankle = pose.getKeypoint(ankleJoint);
+    final boxPaint = Paint()
+      ..color = (isMovementCorrect ? greenTracking : cyanTracking).withValues(alpha: 0.40)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.4;
 
-    // 1. Thin green tracking lines along relevant joints
-    final linePaint = Paint()
-      ..color = trackingGreen
-      ..strokeWidth = 2.4
+    final rrect = RRect.fromRectAndRadius(box, const Radius.circular(10));
+    canvas.drawRRect(rrect, boxPaint);
+
+    // Corner brackets accent
+    final cornerPaint = Paint()
+      ..color = isMovementCorrect ? greenTracking : cyanTracking
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.6
       ..strokeCap = StrokeCap.round;
 
-    if (hip != null && knee != null && hip.isVisible && knee.isVisible && !isOccluded) {
-      canvas.drawLine(hip.position, knee.position, linePaint);
-    }
+    const cornerLen = 14.0;
+    // Top-Left
+    canvas.drawLine(box.topLeft, box.topLeft + const Offset(cornerLen, 0), cornerPaint);
+    canvas.drawLine(box.topLeft, box.topLeft + const Offset(0, cornerLen), cornerPaint);
+    // Top-Right
+    canvas.drawLine(box.topRight, box.topRight + const Offset(-cornerLen, 0), cornerPaint);
+    canvas.drawLine(box.topRight, box.topRight + const Offset(0, cornerLen), cornerPaint);
+    // Bottom-Left
+    canvas.drawLine(box.bottomLeft, box.bottomLeft + const Offset(cornerLen, 0), cornerPaint);
+    canvas.drawLine(box.bottomLeft, box.bottomLeft + const Offset(0, -cornerLen), cornerPaint);
+    // Bottom-Right
+    canvas.drawLine(box.bottomRight, box.bottomRight + const Offset(-cornerLen, 0), cornerPaint);
+    canvas.drawLine(box.bottomRight, box.bottomRight + const Offset(0, -cornerLen), cornerPaint);
 
-    if (knee != null && ankle != null && knee.isVisible && ankle.isVisible && !isOccluded) {
-      canvas.drawLine(knee.position, ankle.position, linePaint);
-    }
+    // Confidence Tag Pill at top of bounding box
+    final confPercent = (pose.personConfidence * 100).toInt().clamp(0, 100);
+    final confText = 'PERSON $confPercent%';
+    final textPainter = TextPainter(
+      text: TextSpan(
+        text: confText,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.5,
+        ),
+      ),
+      textDirection: TextDirection.ltr,
+    )..layout();
 
-    // 2. Small green circular joint markers
-    // Hip marker: Small green circle (radius 3.6)
-    if (hip != null && hip.isVisible) {
-      _drawJointCircle(canvas, hip.position, radius: 3.6, isPrimary: false);
-    }
+    final badgeOffset = Offset(box.left + 8, (box.top - 18).clamp(8.0, double.infinity));
+    final badgeRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(badgeOffset.dx - 4, badgeOffset.dy - 2, textPainter.width + 8, textPainter.height + 4),
+      const Radius.circular(4),
+    );
 
-    // Ankle marker: Small green circle (radius 3.6)
-    if (ankle != null && ankle.isVisible) {
-      _drawJointCircle(canvas, ankle.position, radius: 3.6, isPrimary: false);
-    }
-
-    // Knee marker: Slightly larger than the others (radius 5.6)
-    if (knee != null && knee.isVisible && !isOccluded) {
-      _drawJointCircle(canvas, knee.position, radius: 5.6, isPrimary: true);
-    }
-  }
-
-  /// Hand / Arm Exercises: Prioritizes SHOULDER -> ELBOW -> WRIST
-  void _drawArmTracking(Canvas canvas) {
-    final isRight = activeJoint == CocoJoint.rightShoulder;
-    final shoulderJoint = isRight ? CocoJoint.rightShoulder : CocoJoint.leftShoulder;
-    final elbowJoint = isRight ? CocoJoint.rightElbow : CocoJoint.leftElbow;
-    final wristJoint = isRight ? CocoJoint.rightWrist : CocoJoint.leftWrist;
-
-    final shoulder = pose.getKeypoint(shoulderJoint);
-    final elbow = pose.getKeypoint(elbowJoint);
-    final wrist = pose.getKeypoint(wristJoint);
-
-    final linePaint = Paint()
-      ..color = trackingGreen
-      ..strokeWidth = 2.4
-      ..strokeCap = StrokeCap.round;
-
-    if (shoulder != null && elbow != null && shoulder.isVisible && elbow.isVisible) {
-      canvas.drawLine(shoulder.position, elbow.position, linePaint);
-    }
-
-    if (elbow != null && wrist != null && elbow.isVisible && wrist.isVisible) {
-      canvas.drawLine(elbow.position, wrist.position, linePaint);
-    }
-
-    if (shoulder != null && shoulder.isVisible) {
-      _drawJointCircle(canvas, shoulder.position, radius: 3.6, isPrimary: false);
-    }
-    if (wrist != null && wrist.isVisible) {
-      _drawJointCircle(canvas, wrist.position, radius: 3.6, isPrimary: false);
-    }
-    if (elbow != null && elbow.isVisible) {
-      _drawJointCircle(canvas, elbow.position, radius: 5.6, isPrimary: true);
-    }
-  }
-
-  /// Draws a clean, solid small green circular joint marker
-  void _drawJointCircle(Canvas canvas, Offset center, {required double radius, required bool isPrimary}) {
-    if (isPrimary) {
-      // Subtle pulse halo
-      final haloPaint = Paint()
-        ..color = trackingGreen.withValues(alpha: 0.25 * (1.0 - pulseValue))
-        ..style = PaintingStyle.fill;
-      canvas.drawCircle(center, radius + 4.0 + (pulseValue * 3.0), haloPaint);
-    }
-
-    // Solid green circle
-    final circlePaint = Paint()
-      ..color = trackingGreen
+    final badgeBgPaint = Paint()
+      ..color = const Color(0xCC0B1220)
       ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, radius, circlePaint);
+    canvas.drawRRect(badgeRect, badgeBgPaint);
 
-    // Tiny white center dot for precision focus
-    final dotPaint = Paint()
-      ..color = Colors.white
-      ..style = PaintingStyle.fill;
-    canvas.drawCircle(center, isPrimary ? 2.0 : 1.4, dotPaint);
+    textPainter.paint(canvas, badgeOffset);
   }
 
-  /// Displays the calculated angle close to the active joint: "Knee 90°"
-  /// NO angle arc or mathematical construction.
-  void _drawCleanAngleLabel(Canvas canvas, {required bool isShoulder}) {
-    final jointNode = pose.getKeypoint(activeJoint);
-    if (jointNode == null || !jointNode.isVisible) return;
+  /// Draws 19 COCO anatomical connection lines
+  void _drawSkeletonConnections(Canvas canvas, Map<CocoJoint, PoseKeypoint> keypointMap) {
+    for (final connection in _skeletonConnections) {
+      final j1 = connection[0];
+      final j2 = connection[1];
 
-    final center = jointNode.position;
-    final label = isShoulder ? 'Arm' : 'Knee';
+      final p1 = keypointMap[j1];
+      final p2 = keypointMap[j2];
+
+      if (p1 == null || p2 == null || !p1.isVisible || !p2.isVisible) continue;
+
+      final bool isActiveLimb = _isConnectionActive(j1, j2);
+
+      final linePaint = Paint()
+        ..color = isActiveLimb
+            ? (isMovementCorrect ? greenTracking : orangeTracking)
+            : cyanTracking.withValues(alpha: 0.65)
+        ..strokeWidth = isActiveLimb ? 3.4 : 2.0
+        ..strokeCap = StrokeCap.round;
+
+      canvas.drawLine(p1.position, p2.position, linePaint);
+    }
+  }
+
+  /// Determines if a skeleton segment is part of the currently targeted exercise limb
+  bool _isConnectionActive(CocoJoint j1, CocoJoint j2) {
+    if (activeJoint == CocoJoint.rightKnee || activeJoint == CocoJoint.leftKnee) {
+      final isRight = activeJoint == CocoJoint.rightKnee;
+      if (isRight) {
+        return (j1 == CocoJoint.rightHip && j2 == CocoJoint.rightKnee) ||
+            (j1 == CocoJoint.rightKnee && j2 == CocoJoint.rightAnkle);
+      } else {
+        return (j1 == CocoJoint.leftHip && j2 == CocoJoint.leftKnee) ||
+            (j1 == CocoJoint.leftKnee && j2 == CocoJoint.leftAnkle);
+      }
+    }
+
+    if (activeJoint == CocoJoint.rightElbow || activeJoint == CocoJoint.leftElbow) {
+      final isRight = activeJoint == CocoJoint.rightElbow;
+      if (isRight) {
+        return (j1 == CocoJoint.rightShoulder && j2 == CocoJoint.rightElbow) ||
+            (j1 == CocoJoint.rightElbow && j2 == CocoJoint.rightWrist);
+      } else {
+        return (j1 == CocoJoint.leftShoulder && j2 == CocoJoint.leftElbow) ||
+            (j1 == CocoJoint.leftElbow && j2 == CocoJoint.leftWrist);
+      }
+    }
+
+    if (activeJoint == CocoJoint.rightShoulder || activeJoint == CocoJoint.leftShoulder) {
+      final isRight = activeJoint == CocoJoint.rightShoulder;
+      if (isRight) {
+        return (j1 == CocoJoint.rightHip && j2 == CocoJoint.rightShoulder) ||
+            (j1 == CocoJoint.rightShoulder && j2 == CocoJoint.rightElbow);
+      } else {
+        return (j1 == CocoJoint.leftHip && j2 == CocoJoint.leftShoulder) ||
+            (j1 == CocoJoint.leftShoulder && j2 == CocoJoint.leftElbow);
+      }
+    }
+
+    if (activeJoint == CocoJoint.rightHip || activeJoint == CocoJoint.leftHip) {
+      final isRight = activeJoint == CocoJoint.rightHip;
+      if (isRight) {
+        return (j1 == CocoJoint.rightShoulder && j2 == CocoJoint.rightHip) ||
+            (j1 == CocoJoint.rightHip && j2 == CocoJoint.rightKnee);
+      } else {
+        return (j1 == CocoJoint.leftShoulder && j2 == CocoJoint.leftHip) ||
+            (j1 == CocoJoint.leftHip && j2 == CocoJoint.leftKnee);
+      }
+    }
+
+    return false;
+  }
+
+  /// Draws circles for all 17 human joints with special active joint pulsing
+  void _drawKeypointCircles(Canvas canvas) {
+    for (final kp in pose.keypoints) {
+      if (!kp.isVisible) continue;
+
+      final isTargetJoint = kp.joint == activeJoint;
+      final center = kp.position;
+
+      if (isTargetJoint) {
+        // Dynamic Pulsing Halo on Active Joint
+        final haloPaint = Paint()
+          ..color = (isMovementCorrect ? activeHaloGreen : activeHaloOrange)
+              .withValues(alpha: (1.0 - pulseValue).clamp(0.1, 0.6))
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(center, 7.0 + (pulseValue * 8.0), haloPaint);
+
+        // Active outer ring
+        final ringPaint = Paint()
+          ..color = isMovementCorrect ? greenTracking : orangeTracking
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.4;
+        canvas.drawCircle(center, 6.2, ringPaint);
+
+        // Core fill
+        final corePaint = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(center, 3.2, corePaint);
+      } else {
+        // Standard Joint Circle
+        final circlePaint = Paint()
+          ..color = kp.color
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(center, 4.0, circlePaint);
+
+        // White Center Dot
+        final dotPaint = Paint()
+          ..color = Colors.white
+          ..style = PaintingStyle.fill;
+        canvas.drawCircle(center, 1.8, dotPaint);
+      }
+    }
+  }
+
+  /// Displays the measured angle label close to the active joint (e.g. "Knee Angle: 142°")
+  void _drawActiveJointAngleLabel(Canvas canvas, Map<CocoJoint, PoseKeypoint> keypointMap) {
+    final activeKp = keypointMap[activeJoint];
+    if (activeKp == null || !activeKp.isVisible) return;
+
+    final center = activeKp.position;
+    final jointName = _resolveJointDisplayName(activeJoint);
 
     final textPainter = TextPainter(
       text: TextSpan(
         children: [
           TextSpan(
-            text: '$label ${measuredAngle.toStringAsFixed(0)}°',
+            text: '$jointName Angle\n',
             style: const TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w800,
+              color: Colors.white70,
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          TextSpan(
+            text: '${measuredAngle.toStringAsFixed(0)}°',
+            style: TextStyle(
+              color: isMovementCorrect ? greenTracking : Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w900,
             ),
           ),
         ],
       ),
       textDirection: TextDirection.ltr,
+      textAlign: TextAlign.center,
     )..layout();
 
-    // Position label slightly offset from the knee marker
-    final labelOffset = Offset(center.dx + 12, center.dy - 12);
+    // Position label slightly offset from the active marker
+    final labelOffset = Offset(center.dx + 16, center.dy - 20);
 
     final bgRect = RRect.fromRectAndRadius(
       Rect.fromLTWH(
-        labelOffset.dx - 5,
-        labelOffset.dy - 3,
-        textPainter.width + 10,
-        textPainter.height + 6,
+        labelOffset.dx - 6,
+        labelOffset.dy - 4,
+        textPainter.width + 12,
+        textPainter.height + 8,
       ),
-      const Radius.circular(5),
+      const Radius.circular(8),
     );
 
-    // Clean, translucent black pill with green hairline
+    // Dark high-contrast translucent pill
     final bgPaint = Paint()
-      ..color = darkOverlayBg
+      ..color = const Color(0xDD0B1220)
       ..style = PaintingStyle.fill;
     canvas.drawRRect(bgRect, bgPaint);
 
     final borderPaint = Paint()
-      ..color = trackingGreen.withValues(alpha: 0.8)
+      ..color = (isMovementCorrect ? greenTracking : AppColors.primaryLight).withValues(alpha: 0.85)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.0;
+      ..strokeWidth = 1.2;
     canvas.drawRRect(bgRect, borderPaint);
 
     textPainter.paint(canvas, labelOffset);
   }
 
-  /// Minimal pose confidence indicator: subtle small chip in corner
-  void _drawMinimalConfidence(Canvas canvas, Size size) {
-    final confPercent = (pose.personConfidence * 100).toInt().clamp(0, 100);
-
-    final textPainter = TextPainter(
-      text: TextSpan(
-        children: [
-          const TextSpan(
-            text: '● ',
-            style: TextStyle(
-              color: trackingGreen,
-              fontSize: 9,
-            ),
-          ),
-          TextSpan(
-            text: 'POSE $confPercent%',
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 9.5,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-            ),
-          ),
-        ],
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout();
-
-    final chipRect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(size.width - textPainter.width - 18, 12, textPainter.width + 10, textPainter.height + 6),
-      const Radius.circular(4),
-    );
-
-    final bgPaint = Paint()
-      ..color = const Color(0x99000000)
-      ..style = PaintingStyle.fill;
-    canvas.drawRRect(chipRect, bgPaint);
-
-    textPainter.paint(canvas, Offset(size.width - textPainter.width - 13, 15));
+  String _resolveJointDisplayName(CocoJoint joint) {
+    switch (joint) {
+      case CocoJoint.leftKnee:
+      case CocoJoint.rightKnee:
+        return 'Knee';
+      case CocoJoint.leftElbow:
+      case CocoJoint.rightElbow:
+        return 'Elbow';
+      case CocoJoint.leftShoulder:
+      case CocoJoint.rightShoulder:
+        return 'Shoulder';
+      case CocoJoint.leftHip:
+      case CocoJoint.rightHip:
+        return 'Hip';
+      case CocoJoint.leftWrist:
+      case CocoJoint.rightWrist:
+        return 'Wrist';
+      default:
+        return joint.label;
+    }
   }
 
   @override
