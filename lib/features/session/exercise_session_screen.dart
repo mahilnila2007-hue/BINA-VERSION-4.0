@@ -4,11 +4,10 @@ import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/exercise_presets.dart';
 import '../../core/theme/color_palette.dart';
-import '../../core/theme/typography.dart';
+import '../../core/utils/video_launcher_helper.dart';
 import '../../domain/models/detected_pose.dart';
 import '../../domain/models/pose_keypoint.dart';
 import '../../domain/models/prescription.dart';
@@ -425,12 +424,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
           ElevatedButton.icon(
             onPressed: () async {
               Navigator.of(ctx).pop();
-              final uri = Uri.parse(rx.trainingVideoUrl);
-              try {
-                if (await canLaunchUrl(uri)) {
-                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                }
-              } catch (_) {}
+              await VideoLauncherHelper.openExerciseVideo(rx.trainingVideoUrl);
             },
             icon: const Icon(Icons.open_in_new_rounded, size: 18),
             label: const Text('Watch Full Video'),

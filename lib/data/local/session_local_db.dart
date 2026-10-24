@@ -48,8 +48,9 @@ class SessionLocalDb {
     await savePatient(arun);
 
     // 2. Prescriptions
-    await savePrescription(ExercisePresets.kneeExtensionPrescription);
-    await savePrescription(ExercisePresets.shoulderAbductionPrescription);
+    for (final rx in ExercisePresets.allPresets) {
+      await savePrescription(rx);
+    }
 
     // 3. Seed historical sessions (Mon -> Thu trend)
     final now = DateTime.now();

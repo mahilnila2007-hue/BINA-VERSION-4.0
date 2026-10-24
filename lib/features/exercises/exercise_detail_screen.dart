@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/exercise_presets.dart';
 import '../../core/theme/color_palette.dart';
+import '../../core/utils/video_launcher_helper.dart';
 import '../../domain/models/prescription.dart';
 import '../auth/auth_provider.dart';
 
@@ -18,39 +18,12 @@ class ExerciseDetailScreen extends ConsumerWidget {
   });
 
   Future<void> _launchVideo(BuildContext context, String url) async {
-    final uri = Uri.parse(url);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Opening tutorial video: $url'),
-              backgroundColor: AppPalette.tealAccent,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Tutorial link: $url'),
-            backgroundColor: AppPalette.tealAccent,
-          ),
-        );
-      }
-    }
+    await VideoLauncherHelper.launchVideoWithFeedback(context, url);
   }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final all = ExercisePresets.allPresets;
-    final rx = all.firstWhere(
-      (p) => p.exerciseId == exerciseId,
-      orElse: () => ExercisePresets.kneeExtensionPrescription,
-    );
+    final rx = ExercisePresets.getById(exerciseId);
 
     return Scaffold(
       backgroundColor: AppPalette.warmWhite,
@@ -140,6 +113,7 @@ class ExerciseDetailScreen extends ConsumerWidget {
                             ),
                           ),
                           InkWell(
+                            key: const Key('open_video_thumbnail'),
                             onTap: () => _launchVideo(context, rx.trainingVideoUrl),
                             child: Container(
                               width: 64,
@@ -201,11 +175,12 @@ class ExerciseDetailScreen extends ConsumerWidget {
                           ),
                           const SizedBox(height: 12),
                           ElevatedButton.icon(
+                            key: const Key('open_video_button'),
                             onPressed: () =>
                                 _launchVideo(context, rx.trainingVideoUrl),
                             icon: const Icon(Icons.play_circle_outline, size: 22),
                             label: const Text(
-                              '▶ TRAINING VIDEO (YouTube)',
+                              'Open Video',
                               style: TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w800,

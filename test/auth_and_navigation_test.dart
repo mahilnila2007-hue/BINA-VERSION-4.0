@@ -91,8 +91,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Rehab Exercises'), findsOneWidget);
-    expect(find.text('Knee Extension'), findsOneWidget);
-    expect(find.text('Shoulder Abduction'), findsOneWidget);
+    expect(find.text('Finger Exercise'), findsOneWidget);
+    expect(find.text('Leg Exercise'), findsOneWidget);
     expect(find.text('Guide & Video'), findsWidgets);
     expect(find.text('Start Exercise'), findsWidgets);
   });
@@ -113,8 +113,8 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    expect(find.text('Knee Extension'), findsWidgets);
-    expect(find.text('▶ TRAINING VIDEO (YouTube)'), findsOneWidget);
+    expect(find.text('Knee Exercise'), findsWidgets);
+    expect(find.text('Open Video'), findsOneWidget);
     expect(find.text('How to perform'), findsOneWidget);
     expect(find.text('Camera Placement Guidance'), findsOneWidget);
     expect(find.text('START LIVE EXERCISE'), findsOneWidget);

@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/constants/exercise_presets.dart';
 import '../../core/theme/color_palette.dart';
+import '../../core/utils/video_launcher_helper.dart';
 import '../../widgets/app_logo.dart';
 import '../auth/auth_provider.dart';
 
@@ -17,30 +17,7 @@ class PatientDashboardScreen extends ConsumerWidget {
   const PatientDashboardScreen({super.key});
 
   Future<void> _launchTutorialVideo(BuildContext context, String url) async {
-    final uri = Uri.parse(url);
-    try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      } else {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Opening tutorial video: $url'),
-              backgroundColor: AppPalette.tealAccent,
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Tutorial video: $url'),
-            backgroundColor: AppPalette.tealAccent,
-          ),
-        );
-      }
-    }
+    await VideoLauncherHelper.launchVideoWithFeedback(context, url);
   }
 
   @override
