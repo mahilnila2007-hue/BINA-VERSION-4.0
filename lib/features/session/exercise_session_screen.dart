@@ -25,14 +25,29 @@ import '../auth/auth_provider.dart';
 
 /// Professional AI Rehabilitation Live Exercise Monitoring Screen.
 /// 
-/// Integrates the real YOLO Pose detection module into the continuous camera feed:
-/// - Real Android camera preview
-/// - YOLO Pose 17 COCO keypoints skeleton overlay
-/// - Exercise-specific joint angle calculations (Knee, Elbow, Shoulder, Hip, Hand)
-/// - Real-time form feedback (✓ GOOD REP / ✕ INCORRECT)
-/// - Multi-phase state machine repetition counting
-/// - Person detection status & Vision AI lifecycle tracking
-/// - Developer / Debug telemetry panel
+/// EXACT TWO-TIER STRUCTURE:
+/// ─────────────────────────────────────────────────────────────
+/// TOP 60–65%:
+///   Large, prominent live camera preview.
+///   YOLO Pose 17-Keypoint Skeleton Overlay (person, joints, lines, bounding box, joint angles).
+///   Compact top-left joint angle pill & top-right Vision AI status badge.
+///   Visually clean with ZERO large instruction or error overlays in the camera area.
+/// 
+/// BOTTOM 35–40%: THREE-PANEL STRUCTURE
+///   LEFT COLUMN (~50% width):
+///     "HOW TO DO" panel with exercise name, step-by-step instructions,
+///     target movement, hold duration, and Watch Video button.
+/// 
+///   RIGHT COLUMN (~50% width) VERTICALLY DIVIDED INTO TWO:
+///     RIGHT TOP = INSTRUCTIONS / STATUS PANEL
+///       Contains camera/pose-detection guidance, detection status,
+///       and live form correction (✓ GOOD FORM / ✕ ADJUST FORM / NO PERSON / etc.).
+/// 
+///     RIGHT BOTTOM = LIVE DASHBOARD
+///       Dedicated physiological & performance dashboard:
+///       HR, SpO2, EMG, EMG/Angle graph, Rep count, Angle, Form score,
+///       and compact PAUSE/STOP controls.
+/// ─────────────────────────────────────────────────────────────
 class ExerciseSessionScreen extends ConsumerStatefulWidget {
   final bool isReplayMode;
 
@@ -339,7 +354,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: AppColors.primary.withOpacity(0.18),
+                color: AppColors.primary.withValues(alpha: 0.18),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: const Icon(Icons.play_circle_fill_rounded, color: AppColors.primaryLight, size: 24),
@@ -378,7 +393,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: AppColors.primary.withOpacity(0.92),
+                      color: AppColors.primary.withValues(alpha: 0.92),
                       shape: BoxShape.circle,
                     ),
                     child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 36),
@@ -440,9 +455,11 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
               // 1. TOP HEADER (LIVE + Set + Camera Flip + Voice Coach + Debug Toggle)
               _buildTopHeader(rx),
 
-              // 2. TOP 50–55%: REAL CAMERA + YOLO SKELETON (HERO VIEW)
+              // 2. TOP 60–65%: LIVE CAMERA PREVIEW (LARGE & PROMINENT)
+              // Visually clean camera feed: user, skeleton overlay, joint angle pill & AI badge ONLY.
+              // NO large instruction/error overlays in the center of the camera.
               Expanded(
-                flex: 11,
+                flex: 13,
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     _viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
@@ -468,13 +485,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                           ),
                         ),
 
-                        // C. Centered Small Prompt if No Person Detected or Joint Occluded
-                        if (!_currentPose.isPersonDetected)
-                          _buildNoPersonOverlay()
-                        else if (_isOccluded)
-                          _buildOcclusionOverlay(),
-
-                        // D. Top-Left Translucent Info Pill: Joint Angle & Target ROM
+                        // C. Top-Left Translucent Info Pill: Joint Angle & Target ROM
                         Positioned(
                           top: 10,
                           left: 12,
@@ -483,32 +494,17 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                           ),
                         ),
 
-                        // E. Top-Right: Person Detection Status & Vision AI Status Badges
+                        // D. Top-Right: Vision AI Status Badge
                         Positioned(
                           top: 10,
                           right: 12,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.end,
-                            children: [
-                              _buildPersonDetectionStatusChip(),
-                              const SizedBox(height: 4),
-                              _buildVisionAiStatusBadge(),
-                            ],
-                          ),
+                          child: _buildVisionAiStatusBadge(),
                         ),
 
-                        // F. Bottom-Center: Translucent Live Form Status Pill
-                        Positioned(
-                          bottom: 10,
-                          left: 16,
-                          right: 16,
-                          child: _buildFloatingStatusPill(),
-                        ),
-
-                        // G. Developer / Debug Telemetry Panel Overlay
+                        // E. Developer / Debug Telemetry Panel Overlay (when toggled)
                         if (_showDebugPanel)
                           Positioned(
-                            bottom: 56,
+                            bottom: 12,
                             right: 12,
                             child: _buildDebugTelemetryPanel(rx),
                           ),
@@ -518,26 +514,46 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                 ),
               ),
 
-              // 3. BOTTOM 45–50%: HORIZONTAL ROW SPLIT (SIDE-BY-SIDE)
+              // 3. BOTTOM 35–40%: THREE-PANEL STRUCTURE
+              // LEFT COLUMN (50% width): "HOW TO DO" Panel
+              // RIGHT COLUMN (50% width) SPLIT VERTICALLY:
+              //   - Top: Instructions / Status Panel
+              //   - Bottom: Live Dashboard Panel
               Expanded(
-                flex: 10,
+                flex: 8,
                 child: Container(
                   color: AppColors.backgroundDark,
-                  padding: const EdgeInsets.fromLTRB(10, 6, 10, 8),
+                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 6),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // LEFT PANEL = HOW TO DO
+                      // LEFT COLUMN: HOW TO DO (50% width)
                       Expanded(
                         flex: 1,
                         child: _buildHowToPanel(rx),
                       ),
                       const SizedBox(width: 8),
 
-                      // RIGHT PANEL = LIVE DASHBOARD
+                      // RIGHT COLUMN: VERTICALLY DIVIDED INTO TWO
                       Expanded(
                         flex: 1,
-                        child: _buildLiveDashboardPanel(rx),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // RIGHT TOP: INSTRUCTIONS / STATUS PANEL
+                            Expanded(
+                              flex: 5,
+                              child: _buildInstructionsStatusPanel(rx),
+                            ),
+                            const SizedBox(height: 6),
+
+                            // RIGHT BOTTOM: LIVE DASHBOARD
+                            Expanded(
+                              flex: 7,
+                              child: _buildLiveDashboardPanel(rx),
+                            ),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -609,7 +625,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
               style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w800,
-                fontSize: 15,
+                fontSize: 14.5,
               ),
               overflow: TextOverflow.ellipsis,
             ),
@@ -617,7 +633,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
 
           // Current Set Badge
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
             decoration: BoxDecoration(
               color: Colors.white12,
               borderRadius: BorderRadius.circular(8),
@@ -626,7 +642,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
               'SET $_currentSet/$_totalSets',
               style: const TextStyle(
                 color: Colors.white70,
-                fontSize: 11,
+                fontSize: 10.5,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.5,
               ),
@@ -685,7 +701,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   }
 
   // =========================================================================
-  // 2. LIVE CAMERA FEED & COMPACT OVERLAYS (TOP 50%)
+  // 2. LIVE CAMERA FEED & CLEAN OVERLAYS (TOP 60-65%)
   // =========================================================================
   Widget _buildCameraFeedBackground() {
     if (_cameraService.isInitialized && _cameraService.controller != null) {
@@ -797,7 +813,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.78),
+        color: Colors.black.withValues(alpha: 0.78),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: inRange
@@ -824,13 +840,13 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
               color: inRange
-                  ? const Color(0xFF10B981).withOpacity(0.2)
-                  : AppColors.primary.withOpacity(0.2),
+                  ? const Color(0xFF10B981).withValues(alpha: 0.2)
+                  : AppColors.primary.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
                 color: inRange
-                    ? const Color(0xFF10B981).withOpacity(0.5)
-                    : AppColors.primaryLight.withOpacity(0.4),
+                    ? const Color(0xFF10B981).withValues(alpha: 0.5)
+                    : AppColors.primaryLight.withValues(alpha: 0.4),
               ),
             ),
             child: Text(
@@ -840,76 +856,6 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
               ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Section 4: Person Detection Status Chip
-  Widget _buildPersonDetectionStatusChip() {
-    final isDetected = _currentPose.isPersonDetected;
-    final conf = _currentPose.personConfidence;
-    final isLowConf = isDetected && conf < 0.45;
-
-    Color badgeColor;
-    String titleText;
-    String subText;
-
-    if (!isDetected) {
-      badgeColor = AppColors.error;
-      titleText = 'NO PERSON DETECTED';
-      subText = 'Move into camera view';
-    } else if (isLowConf) {
-      badgeColor = AppColors.warning;
-      titleText = 'LOW CONFIDENCE';
-      subText = 'Improve lighting or camera position';
-    } else {
-      badgeColor = AppColors.success;
-      titleText = 'PERSON DETECTED';
-      subText = 'Confidence: ${conf.toStringAsFixed(2)}';
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.80),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: badgeColor.withOpacity(0.8), width: 1.0),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: badgeColor,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Text(
-                titleText,
-                style: TextStyle(
-                  color: badgeColor,
-                  fontSize: 9.5,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.4,
-                ),
-              ),
-            ],
-          ),
-          Text(
-            subText,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 8.5,
-              fontWeight: FontWeight.w600,
             ),
           ),
         ],
@@ -945,7 +891,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.80),
+        color: Colors.black.withValues(alpha: 0.80),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(color: Colors.white12),
       ),
@@ -980,9 +926,9 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.88),
+        color: Colors.black.withValues(alpha: 0.88),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.primaryLight.withOpacity(0.5)),
+        border: Border.all(color: AppColors.primaryLight.withValues(alpha: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1007,104 +953,8 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     );
   }
 
-  /// Floating Status Pill: Translucent, High-Contrast Coaching Prompt (✓ GOOD REP / ✕ INCORRECT)
-  Widget _buildFloatingStatusPill() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: _feedbackColor.withOpacity(0.92),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white24, width: 1.0),
-        boxShadow: [
-          BoxShadow(
-            color: _feedbackColor.withOpacity(0.4),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(_feedbackIcon, size: 20, color: Colors.white),
-          const SizedBox(width: 8),
-          Flexible(
-            child: Text(
-              _currentFeedback,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w800,
-                fontSize: 13.5,
-                letterSpacing: 0.3,
-              ),
-              textAlign: TextAlign.center,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Centered Subtle "Move into camera view" Prompt
-  Widget _buildNoPersonOverlay() {
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 36),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.75),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.white24, width: 1.0),
-        ),
-        child: const Text(
-          'Position yourself in front of the camera',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 0.2,
-          ),
-          textAlign: TextAlign.center,
-        ),
-      ),
-    );
-  }
-
-  /// Centered "Joint Not Detected" Prompt
-  Widget _buildOcclusionOverlay() {
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 32),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.85),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.warning, width: 1.4),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: const [
-            Icon(Icons.visibility_off_rounded, color: AppColors.warning, size: 30),
-            SizedBox(height: 6),
-            Text(
-              'TARGET JOINT NOT DETECTED',
-              style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w900),
-            ),
-            SizedBox(height: 2),
-            Text(
-              'Adjust your position to keep limb in camera view',
-              style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   // =========================================================================
-  // 3. LEFT PANEL = HOW TO DO (Bottom Left 50%)
+  // 3. BOTTOM SECTION: PANEL 1 - LEFT COLUMN = HOW TO DO (~50% width)
   // =========================================================================
   Widget _buildHowToPanel(Prescription rx) {
     final instructionsList = rx.instructions
@@ -1115,10 +965,10 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white12),
       ),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: LayoutBuilder(
         builder: (context, constraints) {
           return SingleChildScrollView(
@@ -1140,9 +990,9 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                             'HOW TO DO',
                             style: TextStyle(
                               color: AppColors.primaryLight,
-                              fontSize: 11,
+                              fontSize: 10.5,
                               fontWeight: FontWeight.w900,
-                              letterSpacing: 1.1,
+                              letterSpacing: 1.0,
                             ),
                           ),
                           Container(
@@ -1153,23 +1003,87 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                             ),
                             child: Text(
                               rx.targetJointName,
-                              style: const TextStyle(color: Colors.white70, fontSize: 9.5, fontWeight: FontWeight.w700),
+                              style: const TextStyle(color: Colors.white70, fontSize: 9, fontWeight: FontWeight.w700),
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 5),
 
-                      // Step-by-step instructions
+                      // 1. Exercise Name
+                      Text(
+                        rx.exerciseName,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 5),
+
+                      // 3 & 4. Target Movement & Hold Duration Row
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.05),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.white10),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.straighten_rounded, size: 11, color: AppColors.primaryLight),
+                                  const SizedBox(width: 3),
+                                  Flexible(
+                                    child: Text(
+                                      'Target: ${rx.minAngle.toInt()}°–${rx.maxAngle.toInt()}°',
+                                      style: const TextStyle(color: Colors.white70, fontSize: 8.5, fontWeight: FontWeight.w700),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.white10),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                Icon(Icons.timer_outlined, size: 11, color: AppColors.primaryLight),
+                                SizedBox(width: 3),
+                                Text(
+                                  'Hold: 2s',
+                                  style: TextStyle(color: Colors.white70, fontSize: 8.5, fontWeight: FontWeight.w700),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+
+                      // 2. Step-by-step instructions
                       ...instructionsList.map(
                         (step) => Padding(
-                          padding: const EdgeInsets.only(bottom: 5),
+                          padding: const EdgeInsets.only(bottom: 4),
                           child: Text(
                             step,
                             style: const TextStyle(
                               color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
                               height: 1.25,
                             ),
                           ),
@@ -1178,30 +1092,30 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                     ],
                   ),
 
-                  // Watch Video Button
+                  // 5. Watch Video Button
                   Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(top: 6),
                     child: InkWell(
                       onTap: () => _showTutorialDialog(rx),
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(8),
                       child: Container(
                         width: double.infinity,
-                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        padding: const EdgeInsets.symmetric(vertical: 6),
                         decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.18),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: AppColors.primaryLight.withOpacity(0.5)),
+                          color: AppColors.primary.withValues(alpha: 0.16),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: AppColors.primaryLight.withValues(alpha: 0.45)),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: const [
-                            Icon(Icons.play_circle_fill_rounded, color: AppColors.primaryLight, size: 16),
-                            SizedBox(width: 6),
+                            Icon(Icons.play_circle_fill_rounded, color: AppColors.primaryLight, size: 15),
+                            SizedBox(width: 5),
                             Text(
                               'Watch Video',
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: 11.5,
+                                fontSize: 11,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
@@ -1220,7 +1134,215 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
   }
 
   // =========================================================================
-  // 4. RIGHT PANEL = LIVE DASHBOARD (Bottom Right 50%)
+  // 4. BOTTOM SECTION: PANEL 2 - RIGHT TOP = INSTRUCTIONS / STATUS PANEL
+  // =========================================================================
+  Widget _buildInstructionsStatusPanel(Prescription rx) {
+    final isDetected = _currentPose.isPersonDetected;
+    final conf = _currentPose.personConfidence;
+    final isLowConf = isDetected && conf < 0.45;
+
+    Color statusColor;
+    IconData statusIcon;
+    String statusTitle;
+    String statusMessage;
+
+    if (_cameraService.permissionDenied) {
+      statusColor = AppColors.error;
+      statusIcon = Icons.no_photography_rounded;
+      statusTitle = 'CAMERA ACCESS REQUIRED';
+      statusMessage = 'Grant camera permission in settings';
+    } else if (!_cameraService.isInitialized) {
+      statusColor = AppColors.warning;
+      statusIcon = Icons.videocam_rounded;
+      statusTitle = 'INITIALIZING CAMERA...';
+      statusMessage = 'Waiting for live camera preview';
+    } else if (!isDetected) {
+      statusColor = AppColors.error;
+      statusIcon = Icons.person_search_rounded;
+      statusTitle = 'NO PERSON DETECTED';
+      statusMessage = 'Position yourself in front of camera / Move into view';
+    } else if (_isOccluded) {
+      statusColor = AppColors.warning;
+      statusIcon = Icons.visibility_off_rounded;
+      statusTitle = 'TARGET JOINT NOT DETECTED';
+      statusMessage = 'Adjust position to keep ${rx.targetJointName.toLowerCase()} in view';
+    } else if (isLowConf) {
+      statusColor = AppColors.warning;
+      statusIcon = Icons.lightbulb_outline_rounded;
+      statusTitle = 'LOW CONFIDENCE';
+      statusMessage = 'Improve lighting or camera position';
+    } else if (_isMovementCorrect) {
+      statusColor = AppColors.success;
+      statusIcon = Icons.check_circle_rounded;
+      statusTitle = '✓ GOOD FORM';
+      statusMessage = '${rx.targetJointName} at ${_currentAngle.toStringAsFixed(0)}° (Target: ${_minAllowedAngle.toInt()}°–${_maxAllowedAngle.toInt()}°)';
+    } else if (_currentFeedback.contains('extend that far') || _currentFeedback.contains('Lower')) {
+      statusColor = AppColors.error;
+      statusIcon = Icons.arrow_downward_rounded;
+      statusTitle = '✕ OVEREXTENSION';
+      statusMessage = _currentFeedback.replaceAll('✕ INCORRECT: ', '');
+    } else if (_currentFeedback.contains('Straighten') || _currentFeedback.contains('Raise') || _currentFeedback.contains('Bend')) {
+      statusColor = AppColors.warning;
+      statusIcon = Icons.arrow_upward_rounded;
+      statusTitle = '✕ ADJUST MOVEMENT';
+      statusMessage = _currentFeedback.replaceAll('✕ INCORRECT: ', '');
+    } else {
+      statusColor = AppColors.primaryLight;
+      statusIcon = Icons.accessibility_new_rounded;
+      statusTitle = 'READY TO START';
+      statusMessage = _currentFeedback;
+    }
+
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.surfaceDark,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: statusColor.withValues(alpha: 0.55),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: statusColor.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          return SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  // Title Bar: STATUS & GUIDANCE + Confidence Tag
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 6,
+                            height: 6,
+                            decoration: BoxDecoration(
+                              color: statusColor,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 5),
+                          const Text(
+                            'STATUS & GUIDANCE',
+                            style: TextStyle(
+                              color: Colors.white70,
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.8,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: isDetected ? statusColor.withValues(alpha: 0.15) : Colors.white10,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: isDetected ? statusColor.withValues(alpha: 0.4) : Colors.white24,
+                            width: 0.8,
+                          ),
+                        ),
+                        child: Text(
+                          isDetected ? 'CONF ${(conf * 100).toInt()}%' : 'NO POSE',
+                          style: TextStyle(
+                            color: isDetected ? statusColor : Colors.white54,
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+
+                  // Dynamic Status Banner Card
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: statusColor.withValues(alpha: 0.35)),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        Icon(statusIcon, color: statusColor, size: 22),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                statusTitle,
+                                style: TextStyle(
+                                  color: statusColor,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.3,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              const SizedBox(height: 1),
+                              Text(
+                                statusMessage,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.2,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Bottom Prompt Cue
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      isDetected
+                          ? (_isMovementCorrect ? 'Keep rhythmic pace' : 'Follow alignment cue')
+                          : 'Ensure good room lighting',
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 8.5,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // =========================================================================
+  // 5. BOTTOM SECTION: PANEL 3 - RIGHT BOTTOM = LIVE DASHBOARD (~50% width)
   // =========================================================================
   Widget _buildLiveDashboardPanel(Prescription rx) {
     final formAccuracy = _currentRep > 0
@@ -1230,10 +1352,10 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surfaceDark,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white12),
       ),
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       child: LayoutBuilder(
         builder: (context, constraints) {
           return SingleChildScrollView(
@@ -1247,7 +1369,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Header Row: LIVE DASHBOARD + Demo Trigger
+                      // Header Row: DASHBOARD + Demo Trigger
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -1255,9 +1377,9 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                             'LIVE DASHBOARD',
                             style: TextStyle(
                               color: Colors.white70,
-                              fontSize: 11,
+                              fontSize: 10,
                               fontWeight: FontWeight.w900,
-                              letterSpacing: 1.0,
+                              letterSpacing: 0.9,
                             ),
                           ),
                           GestureDetector(
@@ -1267,10 +1389,10 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                               });
                             },
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                               decoration: BoxDecoration(
-                                color: _demoModeEnabled ? AppColors.success.withOpacity(0.2) : Colors.white10,
-                                borderRadius: BorderRadius.circular(6),
+                                color: _demoModeEnabled ? AppColors.success.withValues(alpha: 0.2) : Colors.white10,
+                                borderRadius: BorderRadius.circular(5),
                                 border: Border.all(
                                   color: _demoModeEnabled ? AppColors.success : Colors.white24,
                                 ),
@@ -1279,7 +1401,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                                 _demoModeEnabled ? 'ESP32 ON' : 'NO SENSOR',
                                 style: TextStyle(
                                   color: _demoModeEnabled ? AppColors.success : Colors.white54,
-                                  fontSize: 8.5,
+                                  fontSize: 8,
                                   fontWeight: FontWeight.w900,
                                 ),
                               ),
@@ -1287,7 +1409,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 5),
 
                       // Sensor Biosignal Rows
                       Row(
@@ -1316,11 +1438,11 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                           ),
                         ],
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 5),
 
                       // Divider Line
                       Container(height: 1, color: Colors.white10),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 5),
 
                       // Live Graph Header
                       Row(
@@ -1336,7 +1458,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                               children: [
                                 Text(
                                   _graphMetricIndex == 0 ? 'EMG Graph' : 'Angle Graph',
-                                  style: const TextStyle(color: Colors.white54, fontSize: 9.5, fontWeight: FontWeight.w700),
+                                  style: const TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.w700),
                                 ),
                                 const SizedBox(width: 3),
                                 const Icon(Icons.swap_horiz_rounded, color: Colors.white38, size: 10),
@@ -1345,7 +1467,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                           ),
                           Text(
                             _graphMetricIndex == 0 ? '${_graphPoints.last.toStringAsFixed(0)}%' : '${_currentAngle.toStringAsFixed(0)}°',
-                            style: const TextStyle(color: AppColors.primaryLight, fontSize: 9.5, fontWeight: FontWeight.w800),
+                            style: const TextStyle(color: AppColors.primaryLight, fontSize: 9, fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
@@ -1353,7 +1475,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
 
                       // Compact Sensor Graph
                       SizedBox(
-                        height: 32,
+                        height: 26,
                         width: double.infinity,
                         child: CustomPaint(
                           painter: _MiniSensorGraphPainter(
@@ -1362,33 +1484,33 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                           ),
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 5),
 
-                      // Rep & Angle Metrics
+                      // Rep, Angle & Form Metrics Row
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
                             'REP ${_currentRep.toString().padLeft(2, '0')}/${_targetReps.toString().padLeft(2, '0')}',
-                            style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w900),
+                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF00E5FF).withOpacity(0.12),
+                              color: const Color(0xFF00E5FF).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFF00E5FF).withOpacity(0.35)),
+                              border: Border.all(color: const Color(0xFF00E5FF).withValues(alpha: 0.35)),
                             ),
                             child: Text(
                               'ANGLE ${_currentAngle.toStringAsFixed(0)}°',
-                              style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 9.5, fontWeight: FontWeight.w900),
+                              style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 9, fontWeight: FontWeight.w900),
                             ),
                           ),
                           Text(
                             'FORM $formAccuracy%',
                             style: TextStyle(
                               color: formAccuracy >= 80 ? AppColors.success : AppColors.warning,
-                              fontSize: 11.5,
+                              fontSize: 11,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
@@ -1399,7 +1521,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
 
                   // Compact Action Controls: [ PAUSE ] and [ STOP ]
                   Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(top: 6),
                     child: Row(
                       children: [
                         // PAUSE / RESUME
@@ -1413,22 +1535,22 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                                 TtsService().speak(_isPaused ? 'Exercise paused' : 'Resuming exercise');
                               }
                             },
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(7),
                             child: Container(
-                              height: 34,
+                              height: 30,
                               decoration: BoxDecoration(
                                 color: _isPaused ? AppColors.success : Colors.white10,
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(7),
                                 border: Border.all(color: Colors.white24, width: 0.8),
                               ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(_isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded, size: 15, color: Colors.white),
+                                  Icon(_isPaused ? Icons.play_arrow_rounded : Icons.pause_rounded, size: 14, color: Colors.white),
                                   const SizedBox(width: 3),
                                   Text(
                                     _isPaused ? 'RESUME' : 'PAUSE',
-                                    style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800),
+                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
                                   ),
                                 ],
                               ),
@@ -1441,21 +1563,21 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
                         Expanded(
                           child: InkWell(
                             onTap: _finishSession,
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(7),
                             child: Container(
-                              height: 34,
+                              height: 30,
                               decoration: BoxDecoration(
                                 color: AppColors.error,
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(7),
                               ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: const [
-                                  Icon(Icons.stop_rounded, size: 15, color: Colors.white),
+                                  Icon(Icons.stop_rounded, size: 14, color: Colors.white),
                                   SizedBox(width: 3),
                                   Text(
                                     'STOP',
-                                    style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800),
+                                    style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
                                   ),
                                 ],
                               ),
@@ -1501,7 +1623,7 @@ class _ExerciseSessionScreenState extends ConsumerState<ExerciseSessionScreen>
           const SizedBox(height: 1),
           Text(
             '$value $unit',
-            style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.w800),
+            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800),
           ),
         ],
       ),
@@ -1573,8 +1695,8 @@ class _MiniSensorGraphPainter extends CustomPainter {
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          lineColor.withOpacity(0.35),
-          lineColor.withOpacity(0.0),
+          lineColor.withValues(alpha: 0.35),
+          lineColor.withValues(alpha: 0.0),
         ],
       ).createShader(Rect.fromLTWH(0, 0, size.width, size.height))
       ..style = PaintingStyle.fill;
@@ -1586,7 +1708,7 @@ class _MiniSensorGraphPainter extends CustomPainter {
     final lastX = size.width;
     final lastY = getY(data.last);
     final dotPaint = Paint()..color = Colors.white;
-    final haloPaint = Paint()..color = lineColor.withOpacity(0.4);
+    final haloPaint = Paint()..color = lineColor.withValues(alpha: 0.4);
 
     canvas.drawCircle(Offset(lastX, lastY), 4.0, haloPaint);
     canvas.drawCircle(Offset(lastX, lastY), 2.0, dotPaint);
