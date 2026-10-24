@@ -76,17 +76,23 @@ class VideoLauncherHelper {
 
     // 1. Attempt opening in YouTube app first (if valid videoId present)
     if (videoId.isNotEmpty) {
-      final appUri = Uri.parse('vnd.youtube:$videoId');
-      try {
-        if (await canLaunchUrl(appUri)) {
-          final launched = await launchUrl(
-            appUri,
-            mode: LaunchMode.externalApplication,
-          );
-          if (launched) return true;
+      final appUris = [
+        Uri.parse('vnd.youtube:$videoId'),
+        Uri.parse('youtube://watch?v=$videoId'),
+      ];
+
+      for (final appUri in appUris) {
+        try {
+          if (await canLaunchUrl(appUri)) {
+            final launched = await launchUrl(
+              appUri,
+              mode: LaunchMode.externalApplication,
+            );
+            if (launched) return true;
+          }
+        } catch (e) {
+          debugPrint('YouTube app URI ($appUri) launch failed, trying next: $e');
         }
-      } catch (e) {
-        debugPrint('YouTube app URI launch attempt failed, falling back to browser: $e');
       }
     }
 
